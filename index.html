@@ -648,10 +648,19 @@ function goPage(id){
 }
 
 // ===== ADMIN =====
-function toggleAdmin(){document.getElementById('adminModal').classList.add('open');if(S.adminUnlocked)showAdminContent();}
+function toggleAdmin(){
+  document.getElementById('adminModal').classList.add('open');
+  // Always require password - never auto-unlock from stored state
+  showAdminLock();
+}
+function showAdminLock(){
+  document.getElementById('adminLock').style.display='block';
+  document.getElementById('adminContent').style.display='none';
+  document.getElementById('adminPw').value='';
+}
 function closeAdmin(){document.getElementById('adminModal').classList.remove('open');}
 function checkAdmin(){
-  if(document.getElementById('adminPw').value===S.settings.password){S.adminUnlocked=true;showAdminContent();}
+  if(document.getElementById('adminPw').value===S.settings.password){showAdminContent();}
   else toast('Wrong password');
 }
 function showAdminContent(){

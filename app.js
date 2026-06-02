@@ -935,7 +935,39 @@ const DEFAULT_PLAYERS=[
     {id:60,name:'ChAlalala',team:'FULL SENSE',role:'Initiator',tier:'C',price:6},
 ];
 
+// ===== DB SETUP CHECK =====
+const SETUP_SQL = `-- Run this once in your Supabase SQL Editor
+CREATE TABLE IF NOT EXISTS valotasy_data (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE valotasy_data ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "public_access" ON valotasy_data
+  FOR ALL USING (true) WITH CHECK (true);`;
+
+async function ensureDB(){
+  const {error} = await sb.from('valotasy_data').select('key').limit(1);
+  if(!error) return true; // table exists
+
+  // Table missing — show setup overlay
+  const overlay = document.getElementById('dbSetupOverlay');
+  if(overlay) overlay.classList.add('open');
+  document.getElementById('lbBody').innerHTML =
+    '<div style="text-align:center;padding:60px;color:var(--muted);font-size:12px;letter-spacing:1px">⚠️ Database not set up yet</div>';
+  return false;
+}
+
+function copySetupSQL(){
+  navigator.clipboard.writeText(SETUP_SQL).then(()=>toast('SQL copied ✓'));
+}
+
 async function init(){
+  const dbReady = await ensureDB();
+  if(!dbReady) return; // stop until DB is set up
+
   await load();
 
   // Force defaults

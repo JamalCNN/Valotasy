@@ -164,46 +164,64 @@ function scrapeOverview(html: string): { stats: Record<string, PlayerStats>; mat
 }
 
 function scrapePerformance(html: string, stats: Record<string, PlayerStats>): void {
-  // mod-adv-stats table
-  const tableMatch = html.match(/<table[^>]*class="[^"]*mod-adv-stats[^"]*"[\s\S]*?<\/table>/);
-  if (!tableMatch) return;
-  const table = tableMatch[0];
+  // Find the LAST mod-adv-stats table — that's the all-maps aggregate
+  const tag = "mod-adv-stats";
+  const lower = html.toLowerCase();
+  let lastTagIdx = -1;
+  let si = 0;
+  while (si < lower.length) {
+    const i = lower.indexOf(tag, si);
+    if (i < 0) break;
+    lastTagIdx = i;
+    si = i + 1;
+  }
+  if (lastTagIdx < 0) return;
 
-  const headerMatch = table.match(/<thead[\s\S]*?<\/thead>/);
-  if (!headerMatch) return;
-  const headers = [...headerMatch[0].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)]
+  const tableStart = html.lastIndexOf("<table", lastTagIdx);
+  const tableEnd = html.indexOf("</table>", lastTagIdx);
+  if (tableStart < 0 || tableEnd < 0) return;
+  const table = html.substring(tableStart, tableEnd + 8);
+
+  // Parse header row (table has no <tbody> — just <tr> elements directly)
+  const allRows = [...table.matchAll(/<tr[\s\S]*?<\/tr>/g)];
+  if (allRows.length < 2) return;
+
+  const headers = [...allRows[0][0].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)]
     .map(h => h[1].replace(/<[^>]+>/g, "").trim().toLowerCase());
 
-  const idx4k = headers.indexOf("4k");
-  const idx5k = headers.indexOf("5k");
-  const idx6k = headers.indexOf("6k");
-  const idx7k = headers.indexOf("7k");
+  const idx4k  = headers.indexOf("4k");
+  const idx5k  = headers.indexOf("5k");
+  const idx6k  = headers.indexOf("6k");
+  const idx7k  = headers.indexOf("7k");
   const idx1v2 = headers.indexOf("1v2");
   const idx1v3 = headers.indexOf("1v3");
   const idx1v4 = headers.indexOf("1v4");
   const idx1v5 = headers.indexOf("1v5");
 
-  const tbody = table.match(/<tbody[\s\S]*?<\/tbody>/);
-  if (!tbody) return;
-
-  for (const rowMatch of tbody[0].matchAll(/<tr[\s\S]*?<\/tr>/g)) {
+  // Parse player rows (skip first row = headers)
+  for (const rowMatch of allRows.slice(1)) {
     const row = rowMatch[0];
     const cells = [...row.matchAll(/<td[\s\S]*?<\/td>/g)].map(c => c[0]);
     if (!cells.length) continue;
 
-    const nameRaw = cells[0].replace(/<[^>]+>/g, "").trim().split("\n")[0].trim();
+    // Player name: strip all tags, split on whitespace, first token is the IGN
+    const nameTokens = cells[0].replace(/<[^>]+>/g, " ").trim().split(/\s+/).filter(Boolean);
+    const nameRaw = nameTokens[0] ?? "";
     const nk = nameRaw.toLowerCase();
     if (!stats[nk]) continue;
 
+    // Extract first number at start of stripped cell text (before round-detail noise)
     function perf(idx: number): number {
       if (idx < 0 || idx >= cells.length) return 0;
-      return parseNum(cells[idx].replace(/<[^>]+>/g, "").split("/")[0]);
+      const txt = cells[idx].replace(/<[^>]+>/g, " ").trim();
+      const m = txt.match(/^(\d+)/);
+      return m ? parseInt(m[1]) : 0;
     }
 
-    if (idx4k >= 0) stats[nk].k4 = perf(idx4k);
-    if (idx5k >= 0) stats[nk].k5 = perf(idx5k);
-    if (idx6k >= 0) stats[nk].k6 = perf(idx6k);
-    if (idx7k >= 0) stats[nk].k7 = perf(idx7k);
+    if (idx4k  >= 0) stats[nk].k4       = perf(idx4k);
+    if (idx5k  >= 0) stats[nk].k5       = perf(idx5k);
+    if (idx6k  >= 0) stats[nk].k6       = perf(idx6k);
+    if (idx7k  >= 0) stats[nk].k7       = perf(idx7k);
     if (idx1v2 >= 0) stats[nk].clutch1v2 = perf(idx1v2);
     if (idx1v3 >= 0) stats[nk].clutch1v3 = perf(idx1v3);
     if (idx1v4 >= 0) stats[nk].clutch1v4 = perf(idx1v4);

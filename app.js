@@ -655,32 +655,53 @@ async function fetchMatch(){
 
 function renderAdminMatchdays(){
   const el=document.getElementById('mdAdminList'); if(!el) return;
-  el.innerHTML=MATCHDAYS.map(md=>`
-    <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:8px 0;border-bottom:0.5px solid var(--border2)">
-      <div style="font-size:12px;font-weight:600">${md.label} <span style="color:var(--muted);font-size:10px;font-weight:400">${md.phase}</span>
-        <span style="margin-left:6px;font-size:9px;padding:2px 6px;border-radius:2px;background:${md.market_open?'rgba(74,222,128,0.15)':'rgba(255,70,85,0.1)'};color:${md.market_open?'#4ade80':'var(--red)'}">${md.market_open?'OPEN':'LOCKED'}</span>
+  el.innerHTML=MATCHDAYS.map(md=>{
+    const dlValue = md.deadline ? md.deadline.slice(0,16) : '';
+    return `
+    <div style="padding:10px 0;border-bottom:0.5px solid var(--border2)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:600">${md.label}</span>
+        <span style="font-size:9px;color:var(--muted)">${md.phase}</span>
+        <span style="font-size:9px;padding:2px 6px;border-radius:2px;background:${md.market_open?'rgba(74,222,128,0.15)':'rgba(255,70,85,0.1)'};color:${md.market_open?'#4ade80':'var(--red)'}">${md.market_open?'OPEN':'LOCKED'}</span>
+        <button onclick="setMarket(${md.id},${!md.market_open})" class="btn-sm ${md.market_open?'btn-del':'btn-edit'}" style="margin-left:auto">${md.market_open?'🔒 Lock':'🔓 Open'}</button>
       </div>
-      <button onclick="setMarket(${md.id},${!md.market_open})" class="btn-sm ${md.market_open?'btn-del':'btn-edit'}">${md.market_open?'🔒 Lock':'🔓 Open'}</button>
-      <button onclick="setDeadlinePrompt(${md.id})" class="btn-sm btn-edit">⏰</button>
-    </div>`).join('');
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="font-size:10px;font-weight:500;letter-spacing:0.5px;color:var(--muted);text-transform:uppercase;white-space:nowrap">⏰ Deadline</span>
+        <input type="datetime-local" id="dl_${md.id}" value="${dlValue}"
+          style="flex:1;background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:5px 8px;font-size:12px;outline:none;border-radius:3px;transition:.2s"
+          onfocus="this.style.borderColor='var(--red)'" onblur="this.style.borderColor='var(--border2)'">
+        <button onclick="setDeadline(${md.id})" class="btn-sm btn-edit" style="white-space:nowrap">Set</button>
+        ${dlValue?`<button onclick="clearDeadline(${md.id})" class="btn-sm btn-del" style="white-space:nowrap">Clear</button>`:''}
+      </div>
+      ${dlValue?`<div style="font-size:10px;color:var(--muted);margin-top:4px">Currently: ${new Date(md.deadline).toLocaleString('th-TH')}</div>`:''}
+    </div>`;
+  }).join('');
 }
 
 async function setMarket(mdId, open){
   await sb.from('matchdays').update({market_open:open}).eq('id',mdId);
   const md=MATCHDAYS.find(m=>m.id===mdId); if(md) md.market_open=open;
-  // Update currentMDId
   const openMD=[...MATCHDAYS].reverse().find(m=>m.market_open);
   currentMDId=openMD?.id||MATCHDAYS[MATCHDAYS.length-1]?.id||null;
   renderAdminMatchdays();
   toast(`${open?'Market opened':'Market locked'} ✓`);
 }
 
-async function setDeadlinePrompt(mdId){
-  const dl=prompt('Enter deadline (ISO format, e.g. 2026-06-15T14:00):');
-  if(!dl) return;
+async function setDeadline(mdId){
+  const input=document.getElementById('dl_'+mdId);
+  if(!input||!input.value){toast('Please pick a date and time');return;}
+  const dl=input.value; // datetime-local gives "YYYY-MM-DDTHH:MM"
   await sb.from('matchdays').update({deadline:dl}).eq('id',mdId);
   const md=MATCHDAYS.find(m=>m.id===mdId); if(md) md.deadline=dl;
-  toast('Deadline set ✓');
+  renderAdminMatchdays();
+  toast(`Deadline set: ${new Date(dl).toLocaleString('th-TH')} ✓`);
+}
+
+async function clearDeadline(mdId){
+  await sb.from('matchdays').update({deadline:null}).eq('id',mdId);
+  const md=MATCHDAYS.find(m=>m.id===mdId); if(md) md.deadline=null;
+  renderAdminMatchdays();
+  toast('Deadline cleared ✓');
 }
 
 async function addPlayer(){

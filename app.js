@@ -18,23 +18,15 @@ const SLOTS = [
 const MDS = ['MD1','MD2','MD3','MD4','MD5','MD6','MD7(KO)','MD8(KO)','Final'];
 
 // ===== LOGIN =====
-let currentUser = null; // {teamId, userId, teamName, manager, pin}
+let currentUser = null; // {userId, manager}
 
-// Generate a random alphanumeric user ID (e.g. "usr_k8f2mX9nP4qR")
-function generateUserId(){
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-  let id = 'usr_';
-  for(let i=0;i<12;i++) id += chars[Math.floor(Math.random()*chars.length)];
-  return id;
+async function hashPin(pin){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
 function showLogin(){
   document.getElementById('loginOverlay').classList.add('open');
-  const saved = localStorage.getItem('vlt_user');
-  if(saved){
-    const u = JSON.parse(saved);
-    document.getElementById('loginManager').value = u.manager||u.teamName||'';
-  }
 }
 
 function hideLogin(){
@@ -47,41 +39,37 @@ async function doLogin(){
   if(!manager){ toast('Please enter your name'); return; }
   if(!pin || pin.length!==4 || isNaN(pin)){ toast('PIN must be 4 digits'); return; }
 
-  // Deterministic team key derived from name + pin (used to look up the account)
-  const teamId = 'team_' + btoa(manager.toLowerCase().replace(/[^a-z0-9]/g,'') + pin).replace(/[^a-zA-Z0-9]/g,'').slice(0,16);
+  const pinHash = await hashPin(pin);
 
-  // Try to load existing account from cloud
-  const cloudTeam = await loadFromCloud(teamId);
-  if(cloudTeam){
+  // Check if account exists
+  const {data: existing} = await sb.from('users').select('id,pin_hash').eq('manager_name', manager).single();
+
+  if(existing){
     // Returning user — verify PIN
-    if(cloudTeam.pin !== pin){ toast('Wrong PIN'); return; }
-    myTeam = {...myTeam, ...cloudTeam};
+    if(existing.pin_hash !== pinHash){ toast('Wrong PIN'); return; }
+    const cloudTeam = await loadFromCloud(existing.id);
+    if(cloudTeam) myTeam = {...myTeam, ...cloudTeam};
+    else myTeam = {name:manager+"'s Team",manager,slots:{},captain:null,captain2:null,chip:null,transfers:0,penalty:0,chipMD:{},lastMD:0,mdPtsArr:[],id:existing.id};
+    currentUser = {userId: existing.id, manager};
     toast('Welcome back, ' + manager + '! ✓');
   } else {
-    // New registration — generate a random unique userId and link it to this team
-    const userId = generateUserId();
-    const teamName = manager + "'s Team";
-    myTeam = {
-      name: teamName, manager: manager,
-      slots: {}, captain: null, captain2: null,
-      chip: null, transfers: 0, penalty: 0,
-      chipMD: {}, lastMD: 0, mdPtsArr: [],
-      id: userId,       // random unique account ID (linked to team)
-      teamId: teamId,   // deterministic key used for login lookup
-      pin: pin
-    };
-    // Persist account immediately — one account per team, indexed by teamId
-    await saveToCloud(teamId, myTeam);
+    // New account — insert into users table, get UUID back
+    const {data: newUser, error} = await sb.from('users').insert({manager_name:manager, pin_hash:pinHash}).select('id').single();
+    if(error){
+      if(error.code==='23505') toast('Name already taken — try another');
+      else { toast('Error creating account'); console.error(error); }
+      return;
+    }
+    myTeam = {name:manager+"'s Team",manager,slots:{},captain:null,captain2:null,chip:null,transfers:0,penalty:0,chipMD:{},lastMD:0,mdPtsArr:[],id:newUser.id};
+    await saveToCloud(newUser.id, myTeam);
+    currentUser = {userId: newUser.id, manager};
     toast('Welcome, ' + manager + '! ✓');
   }
 
-  currentUser = {teamId, userId: myTeam.id, teamName: myTeam.name, manager, pin};
-  localStorage.setItem('vlt_user', JSON.stringify({teamName: myTeam.name, manager, pin, teamId, userId: myTeam.id}));
+  localStorage.setItem('vlt_user', JSON.stringify({userId: currentUser.userId, manager}));
   localStorage.setItem('vlt_my', JSON.stringify(myTeam));
-
   document.getElementById('navUserName').textContent = manager;
   document.getElementById('navUserBadge').style.display = 'flex';
-
   hideLogin();
   renderTeamPage();
 }
@@ -100,12 +88,27 @@ function doLogout(){
   toast('Logged out ✓');
 }
 
+async function tryAutoLogin(){
+  const saved = localStorage.getItem('vlt_user');
+  if(!saved) return false;
+  const {userId, manager} = JSON.parse(saved);
+  if(!userId || !manager) return false;
+  // Verify account still exists in DB
+  const {data: user} = await sb.from('users').select('id').eq('id', userId).single();
+  if(!user){ localStorage.removeItem('vlt_user'); localStorage.removeItem('vlt_my'); return false; }
+  // Load team
+  const cloudTeam = await loadFromCloud(userId);
+  if(cloudTeam) myTeam = {...myTeam, ...cloudTeam};
+  currentUser = {userId, manager};
+  document.getElementById('navUserName').textContent = manager;
+  document.getElementById('navUserBadge').style.display = 'flex';
+  localStorage.setItem('vlt_my', JSON.stringify(myTeam));
+  return true;
+}
+
 async function saveMyTeamCloud(){
-  if(!myTeam.id) return;
-  myTeam.pin = currentUser?.pin || myTeam.pin;
-  // Save under the deterministic teamId key so login can always find it
-  const key = myTeam.teamId || currentUser?.teamId || myTeam.id;
-  await saveToCloud(key, myTeam);
+  if(!currentUser?.userId) return;
+  await saveToCloud(currentUser.userId, myTeam);
   localStorage.setItem('vlt_my', JSON.stringify(myTeam));
 }
 
@@ -797,15 +800,10 @@ async function saveAndSubmit(){
 async function deleteMyTeam(){
   if(!currentUser){ toast('Not logged in'); return; }
   if(!confirm('Remove your team from the leaderboard? You can re-register later.')) return;
-  // Remove from S.teams
   S.teams = (S.teams||[]).filter(t=>t.id!==myTeam.id);
-  // Remove from Supabase (keyed by teamId)
-  const key = myTeam.teamId || currentUser?.teamId;
-  try { if(key) await sb.from('valotasy_data').delete().eq('key', key); } catch(e){}
-  // Clear local
-  myTeam = {name:'', manager:currentUser.manager, slots:{}, captain:null, captain2:null,
-    chip:null, transfers:0, penalty:0, chipMD:{}, lastMD:0, mdPtsArr:[],
-    id:myTeam.id, teamId:myTeam.teamId, pin:currentUser.pin};
+  try { await sb.from('valotasy_data').delete().eq('key', currentUser.userId); } catch(e){}
+  myTeam = {name:currentUser.manager+"'s Team", manager:currentUser.manager, slots:{}, captain:null, captain2:null,
+    chip:null, transfers:0, penalty:0, chipMD:{}, lastMD:0, mdPtsArr:[], id:currentUser.userId};
   localStorage.setItem('vlt_my', JSON.stringify(myTeam));
   await save();
   toast('Team removed from leaderboard ✓');
@@ -817,13 +815,10 @@ async function removeMyTeamFromLB(){
   if(!currentUser){ toast('Not logged in'); return; }
   if(!confirm('Remove your team from the leaderboard? Your login will remain.')) return;
   S.teams = (S.teams||[]).filter(t => t.id !== myTeam.id);
-  await save();
-  // Clear cloud team data (keyed by teamId)
-  const key = myTeam.teamId || currentUser?.teamId;
-  try { if(key) await sb.from('valotasy_data').delete().eq('key', key); } catch(e){}
-  // Reset local team slots but keep login and userId
+  try { await sb.from('valotasy_data').delete().eq('key', currentUser.userId); } catch(e){}
   myTeam = {...myTeam, name:currentUser.manager+"'s Team", slots:{}, captain:null, captain2:null,
     chip:null, transfers:0, penalty:0, chipMD:{}, lastMD:S.settings.curMD, mdPtsArr:[]};
+  await save();
   saveMyTeam();
   renderTeamPage();
   toast('Team removed from leaderboard ✓');
@@ -942,17 +937,26 @@ CREATE TABLE IF NOT EXISTS valotasy_data (
   value TEXT NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-
 ALTER TABLE valotasy_data ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_access" ON valotasy_data FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "public_access" ON valotasy_data
-  FOR ALL USING (true) WITH CHECK (true);`;
+CREATE TABLE IF NOT EXISTS users (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  manager_name TEXT NOT NULL UNIQUE,
+  pin_hash     TEXT NOT NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_access" ON users FOR ALL USING (true) WITH CHECK (true);`;
 
 async function ensureDB(){
-  const {error} = await sb.from('valotasy_data').select('key').limit(1);
-  if(!error) return true; // table exists
+  const [r1, r2] = await Promise.all([
+    sb.from('valotasy_data').select('key').limit(1),
+    sb.from('users').select('id').limit(1)
+  ]);
+  if(!r1.error && !r2.error) return true;
 
-  // Table missing — show setup overlay
+  // One or both tables missing — show setup overlay
   const overlay = document.getElementById('dbSetupOverlay');
   if(overlay) overlay.classList.add('open');
   document.getElementById('lbBody').innerHTML =
@@ -987,8 +991,8 @@ async function init(){
     }
   }
 
-  // Always require login on every page load — no auto-restore
-  currentUser = null;
+  // Try to restore session from localStorage (auto-login)
+  await tryAutoLogin();
 
   // Subscribe to realtime updates
   subscribeRealtime();

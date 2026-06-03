@@ -219,7 +219,7 @@ function goPage(id){
 async function renderLB(){
   const curMD = MATCHDAYS.find(m=>m.id===lbMDId);
   document.getElementById('lbMdNav').innerHTML = MATCHDAYS.map(md=>
-    `<button class="md-btn ${md.id===lbMDId?'on':''}" onclick="lbMDId=${md.id};renderLB()">${md.label}</button>`
+    `<button class="md-btn ${md.id===lbMDId?'on':''}" onclick="lbMDId=${md.id};renderLB();startCountdown()">${md.label}</button>`
   ).join('');
 
   const [{data:teams},{data:mdScores},{data:chips}] = await Promise.all([
@@ -239,6 +239,7 @@ async function renderLB(){
     <div class="stat-box"><div class="stat-lbl">Teams</div><div class="stat-val">${teams?.length||0}</div></div>
     <div class="stat-box"><div class="stat-lbl">Matchday</div><div class="stat-val">${curMD?.label||'—'}</div></div>`;
 
+  renderLBDeadline();
   const body = document.getElementById('lbBody');
   if(!teams?.length){
     body.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted);font-size:12px;letter-spacing:1px;text-transform:uppercase">No teams yet — invite your friends!</div>';

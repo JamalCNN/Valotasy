@@ -94,6 +94,7 @@ let MATCHDAYS  = [];
 let PLAYERS    = [];
 let currentMDId = null;
 let lbMDId      = null;
+let _countdownTimer = null;
 
 // My team state
 let myTeamId       = null;
@@ -208,7 +209,8 @@ function goPage(id){
     return;
   }
   document.getElementById('page-'+id).classList.add('active');
-  if(id==='lb')    renderLB();
+  if(id==='lb'){ renderLB(); startCountdown(); }
+  else stopCountdown();
   if(id==='team')  renderTeamPage();
   if(id==='players') renderPlayersPage();
 }
@@ -264,6 +266,76 @@ async function renderLB(){
       </div>
     </div>`;
   }).join('');
+}
+
+function startCountdown(){
+  stopCountdown();
+  renderLBDeadline();
+  _countdownTimer = setInterval(renderLBDeadline, 1000);
+}
+
+function stopCountdown(){
+  if(_countdownTimer){ clearInterval(_countdownTimer); _countdownTimer=null; }
+}
+
+function renderLBDeadline(){
+  const el = document.getElementById('lbDeadlineBanner');
+  if(!el) return;
+
+  // Use the deadline of the matchday being viewed in LB
+  const md = MATCHDAYS.find(m=>m.id===lbMDId);
+  if(!md?.deadline){
+    el.innerHTML='';
+    return;
+  }
+
+  const now  = new Date();
+  const target = new Date(md.deadline);
+  const diff = target - now;
+
+  if(diff <= 0){
+    el.innerHTML=`
+      <div style="background:rgba(255,70,85,0.08);border:0.5px solid rgba(255,70,85,0.3);
+        padding:10px 16px;border-radius:4px;margin-bottom:14px;
+        display:flex;align-items:center;gap:10px;font-size:12px;font-weight:500;color:var(--red)">
+        🔒 Deadline passed — transfers closed
+      </div>`;
+    stopCountdown();
+    return;
+  }
+
+  const totalSec = Math.floor(diff/1000);
+  const days  = Math.floor(totalSec/86400);
+  const hours = Math.floor((totalSec%86400)/3600);
+  const mins  = Math.floor((totalSec%3600)/60);
+  const secs  = totalSec%60;
+
+  const pad = n=>String(n).padStart(2,'0');
+  const parts = days>0
+    ? `${days}d ${pad(hours)}h ${pad(mins)}m ${pad(secs)}s`
+    : `${pad(hours)}h ${pad(mins)}m ${pad(secs)}s`;
+
+  // Colour shifts red as deadline approaches (< 1 hour)
+  const urgent = diff < 3600000;
+  const color  = urgent ? 'var(--red)' : 'var(--accent)';
+  const bg     = urgent ? 'rgba(255,70,85,0.06)' : 'rgba(0,212,255,0.06)';
+  const border = urgent ? 'rgba(255,70,85,0.25)' : 'rgba(0,212,255,0.2)';
+
+  const deadlineStr = target.toLocaleString('en-GB',{
+    day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'
+  });
+
+  el.innerHTML=`
+    <div style="background:${bg};border:0.5px solid ${border};
+      padding:10px 16px;border-radius:4px;margin-bottom:14px;
+      display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div style="font-size:11px;color:var(--muted)">
+        ⏰ <strong style="color:${color}">${md.label}</strong> Deadline: ${deadlineStr}
+      </div>
+      <div style="font-size:20px;font-weight:700;letter-spacing:2px;color:${color};font-variant-numeric:tabular-nums">
+        ${parts}
+      </div>
+    </div>`;
 }
 
 async function expandTeam(expId, teamId){
@@ -929,6 +1001,7 @@ async function init(){
   await tryAutoLogin();
   subscribeRealtime();
   renderLB();
+  startCountdown();
 }
 
 init();

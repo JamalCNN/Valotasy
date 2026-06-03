@@ -656,7 +656,7 @@ async function fetchMatch(){
 function renderAdminMatchdays(){
   const el=document.getElementById('mdAdminList'); if(!el) return;
   el.innerHTML=MATCHDAYS.map(md=>{
-    const dlValue = md.deadline ? md.deadline.slice(0,16) : '';
+    const dlDisplay = md.deadline ? new Date(md.deadline).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
     return `
     <div style="padding:10px 0;border-bottom:0.5px solid var(--border2)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -667,15 +667,33 @@ function renderAdminMatchdays(){
       </div>
       <div style="display:flex;gap:6px;align-items:center">
         <span style="font-size:10px;font-weight:500;letter-spacing:0.5px;color:var(--muted);text-transform:uppercase;white-space:nowrap">⏰ Deadline</span>
-        <input type="datetime-local" id="dl_${md.id}" value="${dlValue}"
-          style="flex:1;background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:5px 8px;font-size:12px;outline:none;border-radius:3px;transition:.2s"
-          onfocus="this.style.borderColor='var(--red)'" onblur="this.style.borderColor='var(--border2)'">
+        <input readonly id="dl_${md.id}" placeholder="Pick date & time..."
+          style="flex:1;background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:5px 10px;font-size:12px;outline:none;border-radius:3px;cursor:pointer">
         <button onclick="setDeadline(${md.id})" class="btn-sm btn-edit" style="white-space:nowrap">Set</button>
-        ${dlValue?`<button onclick="clearDeadline(${md.id})" class="btn-sm btn-del" style="white-space:nowrap">Clear</button>`:''}
+        ${md.deadline?`<button onclick="clearDeadline(${md.id})" class="btn-sm btn-del" style="white-space:nowrap">Clear</button>`:''}
       </div>
-      ${dlValue?`<div style="font-size:10px;color:var(--muted);margin-top:4px">Currently: ${new Date(md.deadline).toLocaleString('th-TH')}</div>`:''}
+      ${dlDisplay?`<div style="font-size:10px;color:var(--muted);margin-top:5px">📅 ${dlDisplay}</div>`:''}
     </div>`;
   }).join('');
+
+  // Init Flatpickr on each deadline input
+  MATCHDAYS.forEach(md=>{
+    const input = document.getElementById('dl_'+md.id);
+    if(!input) return;
+    flatpickr(input, {
+      enableTime: true,
+      time_24hr: true,
+      dateFormat: 'Y-m-dTH:i',
+      altInput: true,
+      altFormat: 'd M Y — H:i',
+      defaultDate: md.deadline||null,
+      disableMobile: false,
+      theme: 'dark',
+      onChange(selectedDates, dateStr){
+        input._selectedDate = dateStr;
+      },
+    });
+  });
 }
 
 async function setMarket(mdId, open){
@@ -689,12 +707,13 @@ async function setMarket(mdId, open){
 
 async function setDeadline(mdId){
   const input=document.getElementById('dl_'+mdId);
-  if(!input||!input.value){toast('Please pick a date and time');return;}
-  const dl=input.value; // datetime-local gives "YYYY-MM-DDTHH:MM"
-  await sb.from('matchdays').update({deadline:dl}).eq('id',mdId);
-  const md=MATCHDAYS.find(m=>m.id===mdId); if(md) md.deadline=dl;
+  const dl=input?._flatpickr?.latestSelectedDateObj;
+  if(!dl){ toast('Please pick a date and time first'); return; }
+  const iso=dl.toISOString();
+  await sb.from('matchdays').update({deadline:iso}).eq('id',mdId);
+  const md=MATCHDAYS.find(m=>m.id===mdId); if(md) md.deadline=iso;
   renderAdminMatchdays();
-  toast(`Deadline set: ${new Date(dl).toLocaleString('th-TH')} ✓`);
+  toast(`Deadline set ✓`);
 }
 
 async function clearDeadline(mdId){

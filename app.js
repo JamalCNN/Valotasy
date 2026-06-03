@@ -508,25 +508,19 @@ function calcBudget(){
 }
 
 function calcMyPts(){
-  let total=0;
-  for(const [slot,p] of Object.entries(myRosters)){
-    if(!p) continue;
-    const raw=mySlotScores[p.id]||0;
-    const isCap=myCaptainId===p.id||myCaptain2Id===p.id;
-    if(myChip==='topfragger'){
-      // handled server-side; just show raw
-      total+=raw;
-    } else if(myChip==='triplecap'&&isCap) total+=raw*3;
-    else if(isCap) total+=raw*2;
-    else total+=raw;
+  // mySlotScores comes from score_logs.final_pts which already includes
+  // captain multiplier and chip effects — just sum them directly
+  let total = Object.values(myRosters).reduce((sum, p) => {
+    return sum + (p ? (mySlotScores[p.id] || 0) : 0);
+  }, 0);
+  // Subtract transfer penalty (before any match scored, still preview correctly)
+  const isMD1 = MATCHDAYS[0]?.id === currentMDId;
+  const isWildcard = myChip === 'wildcard';
+  if(!isMD1 && !isWildcard){
+    const extra = Math.max(0, myTransferCount - 2);
+    total -= extra * (TOURNAMENT?.transfer_penalty || 8);
   }
-  // Subtract penalty
-  const isMD1=MATCHDAYS[0]?.id===currentMDId;
-  if(!isMD1&&myChip!=='wildcard'){
-    const extra=Math.max(0,myTransferCount-2);
-    total-=extra*(TOURNAMENT?.transfer_penalty||8);
-  }
-  document.getElementById('myTotalPts').textContent=total;
+  document.getElementById('myTotalPts').textContent = total;
 }
 
 // ===== PLAYER PICKER =====

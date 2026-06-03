@@ -292,24 +292,44 @@ Deno.serve(async (req) => {
     }));
     await sb.from("match_player_cache").upsert(cacheRows, { onConflict: "match_id,player_name" });
 
-    // Score all teams
-    // Load all rosters + captain + active chip for this matchday
-    const { data: rosters } = await sb
-      .from("rosters")
-      .select(`
-        team_id, slot, player_id,
-        players!inner(name),
-        teams!inner(
-          id, user_id, tournament_id, captain_id, captain2_id,
-          active_chips(chip_name)
-        )
-      `)
-      .eq("teams.tournament_id", tournament_id);
+    // Score all teams — load data in parallel with correct matchday filters
+    const [
+      { data: rosters },
+      { data: allTeams },
+      { data: chipsThisMD },
+      { data: penaltyTransfers },
+      { data: tournamentRow },
+    ] = await Promise.all([
+      sb.from("rosters").select("team_id, slot, player_id, players!inner(name)")
+        .in("team_id",
+          (await sb.from("teams").select("id").eq("tournament_id", tournament_id)).data?.map((t: any) => t.id) ?? []
+        ),
+      sb.from("teams").select("id, captain_id, captain2_id").eq("tournament_id", tournament_id),
+      // Only chips activated for THIS matchday
+      sb.from("active_chips").select("team_id, chip_name").eq("matchday_id", matchday_id),
+      // Only transfers with penalty in THIS matchday
+      sb.from("transfers").select("team_id").eq("matchday_id", matchday_id).eq("penalty_applied", true),
+      sb.from("tournaments").select("transfer_penalty").eq("id", tournament_id).single(),
+    ]);
 
     if (!rosters?.length) {
-      // No teams yet — still save cache + mark processed
       await sb.from("processed_matches").insert({ match_id: matchId, tournament_id, matchday_id });
       return json({ ok: true, matchId, players: Object.keys(stats).length, teamsScored: 0 });
+    }
+
+    const transferPenaltyPts: number = tournamentRow?.transfer_penalty ?? 8;
+
+    // Build lookup maps
+    const captainMap: Record<string, { captainId: number | null; captain2Id: number | null }> = {};
+    for (const t of (allTeams ?? [])) captainMap[t.id] = { captainId: t.captain_id, captain2Id: t.captain2_id };
+
+    const chipMap: Record<string, string> = {};
+    for (const c of (chipsThisMD ?? [])) chipMap[c.team_id] = c.chip_name;
+
+    // Count penalty transfers per team
+    const penaltyCount: Record<string, number> = {};
+    for (const tr of (penaltyTransfers ?? [])) {
+      penaltyCount[tr.team_id] = (penaltyCount[tr.team_id] ?? 0) + 1;
     }
 
     // Group roster slots by team
@@ -318,21 +338,19 @@ Deno.serve(async (req) => {
       slots: { slot: string; playerId: number; playerName: string }[];
     }> = {};
 
-    for (const row of rosters) {
-      const t = (row as any).teams;
-      if (t.tournament_id !== tournament_id) continue;
-      if (!teamMap[t.id]) {
-        const chipRow = t.active_chips?.find((c: any) => true); // one chip per matchday
-        teamMap[t.id] = {
-          captainId: t.captain_id,
-          captain2Id: t.captain2_id,
-          chip: chipRow?.chip_name ?? null,
+    for (const row of (rosters ?? [])) {
+      if (!teamMap[row.team_id]) {
+        const caps = captainMap[row.team_id] ?? { captainId: null, captain2Id: null };
+        teamMap[row.team_id] = {
+          captainId: caps.captainId,
+          captain2Id: caps.captain2Id,
+          chip: chipMap[row.team_id] ?? null,
           slots: [],
         };
       }
       const playerName = (row as any).players?.name ?? "";
       if (playerName) {
-        teamMap[t.id].slots.push({ slot: row.slot, playerId: row.player_id, playerName });
+        teamMap[row.team_id].slots.push({ slot: row.slot, playerId: row.player_id, playerName });
       }
     }
 
@@ -415,8 +433,10 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Transfer penalty fetched from matchday_scores if it exists, else 0
-      matchdayScores[teamId] = { raw: teamRaw, penalty: 0 };
+      // Transfer penalty: count penalty_applied transfers × penalty pts
+      const penCount = penaltyCount[teamId] ?? 0;
+      const penPts = penCount * transferPenaltyPts;
+      matchdayScores[teamId] = { raw: teamRaw, penalty: penPts };
     }
 
     // Upsert score_logs

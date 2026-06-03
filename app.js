@@ -597,7 +597,7 @@ function showAdminLock(){
 }
 function closeAdmin(){ document.getElementById('adminModal').classList.remove('open'); }
 function checkAdmin(){
-  if(document.getElementById('adminPw').value===TOURNAMENT?.admin_password||document.getElementById('adminPw').value==='1234') showAdminContent();
+  if(document.getElementById('adminPw').value===TOURNAMENT?.admin_password||document.getElementById('adminPw').value==='08190349') showAdminContent();
   else toast('Wrong password');
 }
 

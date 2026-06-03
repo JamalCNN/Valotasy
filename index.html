@@ -81,40 +81,37 @@
             <button class="btn btn-red" onclick="addPlayer()" style="width:100%">Add Player</button>
           </div>
           <div class="admin-card">
-            <h3>📊 Enter Matchday Scores</h3>
+            <h3>🌐 Fetch Match from VLR.gg</h3>
             <div class="form-group"><label>Matchday</label>
-              <select id="aMD" onchange="renderScoreList()">
-                <option value="0">MD 1</option><option value="1">MD 2</option><option value="2">MD 3</option>
-                <option value="3">MD 4</option><option value="4">MD 5</option><option value="5">MD 6</option>
-                <option value="6">MD 7 (KO R1)</option><option value="7">MD 8 (KO R2)</option><option value="8">Final</option>
-              </select>
+              <select id="fetchMDSelect"></select>
             </div>
-            <div class="score-list" id="scoreList"></div>
-            <button class="btn btn-red" onclick="saveScores()" style="width:100%;margin-top:12px">Save Scores + Update Prices</button>
+            <div class="form-group"><label>VLR.gg Match URL</label>
+              <input id="fetchURL" placeholder="https://www.vlr.gg/12345/team-a-vs-team-b">
+            </div>
+            <button class="btn btn-red" onclick="fetchMatch()" style="width:100%">⚡ Fetch & Auto-Score</button>
+            <div id="fetchResult" style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.5"></div>
           </div>
         </div>
+
+        <!-- MATCHDAY MANAGEMENT -->
+        <div class="admin-card" style="margin-top:16px">
+          <h3>📅 Matchday Management</h3>
+          <div id="mdAdminList" style="margin-top:4px"></div>
+        </div>
+
         <div class="admin-card" style="margin-top:16px">
           <h3>👥 All Players (<span id="playerCount">0</span>)</h3>
           <div class="player-list-admin" id="playerListAdmin"></div>
         </div>
+
         <div class="admin-card" style="margin-top:16px">
-          <h3>⚙️ Settings</h3>
+          <h3>⚙️ Tournament Settings</h3>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-            <div class="form-group"><label>Current Matchday</label>
-              <select id="setCurMD"><option value="0">MD 1</option><option value="1">MD 2</option><option value="2">MD 3</option><option value="3">MD 4</option><option value="4">MD 5</option><option value="5">MD 6</option><option value="6">MD 7 (KO)</option><option value="7">MD 8 (KO)</option><option value="8">Final</option></select>
-            </div>
-            <div class="form-group"><label>Deadline Status</label>
-              <select id="setLocked"><option value="0">Open — transfers allowed</option><option value="1">Locked — no transfers</option></select>
-            </div>
             <div class="form-group"><label>Starting Budget (M)</label><input type="number" id="setBudget" value="100" min="0" max="300"></div>
             <div class="form-group"><label>Transfer Penalty (pts)</label><input type="number" id="setPenalty" value="8" min="0"></div>
-            <div class="form-group"><label>Deadline Date & Time</label><input type="datetime-local" id="setDeadline"></div>
             <div class="form-group"><label>Admin Password</label><input type="password" id="setPassword" placeholder="Change password..."></div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
-            <button class="btn btn-red" onclick="saveSettings()">Save Settings</button>
-            <button class="btn btn-outline" onclick="if(confirm('Reset all data? This cannot be undone.'))resetAll()">Reset All</button>
-          </div>
+          <button class="btn btn-red" onclick="saveSettings()" style="margin-top:4px">Save Settings</button>
         </div>
 
         <!-- TEAM MANAGEMENT -->

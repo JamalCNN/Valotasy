@@ -937,7 +937,8 @@ async function renderPredictPage(){
         const sel=pred&&pred.score_a===s.a&&pred.score_b===s.b;
         return `<button onclick="setPredScore(${fx.id},${s.a},${s.b})"
           data-pred-fix="${fx.id}" data-sa="${s.a}" data-sb="${s.b}"
-          class="btn-sm ${sel?'':'btn-edit'}">${s.a}-${s.b}</button>`;
+          style="${sel?'background:var(--accent);color:#000;border-color:var(--accent);font-weight:700':''}"
+          class="btn-sm">${s.a}-${s.b}</button>`;
       }).join('');
 
       return `<div class="card" style="padding:14px 16px;margin-bottom:8px">
@@ -997,7 +998,11 @@ function setPredScore(fxId, scoreA, scoreB){
   document.getElementById('pa_'+fxId).value=scoreA;
   document.getElementById('pb_'+fxId).value=scoreB;
   document.querySelectorAll(`[data-pred-fix="${fxId}"]`).forEach(b=>{
-    b.classList.toggle('btn-edit', !(b.dataset.sa==scoreA&&b.dataset.sb==scoreB));
+    const isSelected = b.dataset.sa==scoreA && b.dataset.sb==scoreB;
+    b.style.background = isSelected ? 'var(--accent)' : '';
+    b.style.color = isSelected ? '#000' : '';
+    b.style.borderColor = isSelected ? 'var(--accent)' : '';
+    b.style.fontWeight = isSelected ? '700' : '';
   });
 }
 

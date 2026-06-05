@@ -27,7 +27,7 @@ function calculateScore(
   pts += stats.k4 * 3;                          // 4K = +3
   pts += stats.k5 * 4;                          // 5K = +4
   pts += stats.k6 * 5;                          // 6K = +5
-  pts += stats.k7 * 6;                          // 7K = +6
+  pts += stats.k7 * 5;                          // 7K = +5
 
   // Clutch: each clutch = +1 regardless of type
   const totalClutch = stats.clutch_1v2 + stats.clutch_1v3 + stats.clutch_1v4 + stats.clutch_1v5;

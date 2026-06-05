@@ -273,7 +273,7 @@ ALTER TABLE processed_matches ADD COLUMN IF NOT EXISTS fixture_id BIGINT REFEREN
 -- 4K              → +3 pts
 -- 5K / Ace        → +4 pts
 -- 6K              → +5 pts
--- 7K              → +6 pts
+-- 7K              → +5 pts
 -- Clutch (each)   → +1 pt  (1v2, 1v3, 1v4, 1v5 all = +1)
 -- Rating2.0 #1    → +3 pts
 -- Rating2.0 #2    → +2 pts

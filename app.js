@@ -93,6 +93,7 @@ let TOURNAMENT = null;
 let MATCHDAYS  = [];
 let PLAYERS    = [];
 let FIXTURES   = [];
+let predMDId   = null;
 let currentMDId = null;
 let lbMDId      = null;
 let _countdownTimer = null;
@@ -129,6 +130,7 @@ async function loadAppData(){
   const lastMD = MATCHDAYS[MATCHDAYS.length-1];
   currentMDId = openMD?.id || lastMD?.id || null;
   lbMDId = currentMDId;
+  if (!predMDId) predMDId = currentMDId;
   return true;
 }
 
@@ -189,6 +191,10 @@ function subscribeRealtime(){
     .on('postgres_changes',{event:'*',schema:'public',table:'matchdays'},(payload)=>{
       loadAppData().then(()=>{ renderLB(); if(currentUser) renderTeamPage(); });
     })
+    .on('postgres_changes',{event:'*',schema:'public',table:'predictions'},(payload)=>{
+      const active=document.querySelector('.page.active');
+      if(active?.id==='page-predict') renderPredictPage();
+    })
     .on('postgres_changes',{event:'*',schema:'public',table:'fixtures'},(payload)=>{
       const ev=payload.eventType;
       if(ev==='INSERT'&&payload.new) FIXTURES.push(payload.new);
@@ -214,9 +220,9 @@ function toast(msg,dur=2200){
 function goPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
-  const map={lb:0,team:1,players:2,rules:3,schedule:4};
+  const map={lb:0,team:1,players:2,rules:3,schedule:4,predict:5};
   document.querySelectorAll('.nav-tab')[map[id]].classList.add('active');
-  if(id==='team'&&!currentUser){
+  if((id==='team'||id==='predict')&&!currentUser){
     showLogin();
     document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
     document.querySelectorAll('.nav-tab')[0].classList.add('active');
@@ -226,9 +232,10 @@ function goPage(id){
   document.getElementById('page-'+id).classList.add('active');
   if(id==='lb'){ renderLB(); startCountdown(); }
   else stopCountdown();
-  if(id==='team')    renderTeamPage();
-  if(id==='players') renderPlayersPage();
+  if(id==='team')     renderTeamPage();
+  if(id==='players')  renderPlayersPage();
   if(id==='schedule') renderSchedulePage();
+  if(id==='predict')  renderPredictPage();
 }
 
 // ===== LEADERBOARD =====
@@ -845,6 +852,169 @@ async function scoreFixture(fxId, mdId){
   } catch(e){
     toast('Network error: '+e.message);
   }
+}
+
+// ===== PREDICTIONS =====
+async function renderPredictPage(){
+  if(!currentUser){ showLogin(); return; }
+  if(!myTeamId) return;
+  if(!predMDId) predMDId = currentMDId || MATCHDAYS[0]?.id;
+
+  // Load user's predictions and all prediction totals in parallel
+  const [{data:myPreds},{data:allPreds},{data:allTeams}] = await Promise.all([
+    sb.from('predictions').select('*').eq('team_id',myTeamId).eq('tournament_id',TOURNAMENT.id),
+    sb.from('predictions').select('team_id,points_earned').eq('tournament_id',TOURNAMENT.id),
+    sb.from('teams').select('id,team_name,users!inner(manager_name)').eq('tournament_id',TOURNAMENT.id),
+  ]);
+
+  const predMap={};
+  for(const p of (myPreds||[])) predMap[p.fixture_id]=p;
+
+  // Build prediction leaderboard
+  const predTotals={};
+  for(const p of (allPreds||[])){ if(p.points_earned!=null) predTotals[p.team_id]=(predTotals[p.team_id]||0)+p.points_earned; }
+  const sortedTeams=(allTeams||[]).map(t=>({...t,predPts:predTotals[t.id]||0})).sort((a,b)=>b.predPts-a.predPts);
+
+  const curMD=MATCHDAYS.find(m=>m.id===predMDId);
+  const mdFixtures=FIXTURES.filter(f=>f.matchday_id===predMDId);
+  const locked=!curMD?.market_open;
+
+  // MD tabs
+  const mdNav=MATCHDAYS.map(md=>
+    `<button class="md-btn ${md.id===predMDId?'on':''}" onclick="predMDId=${md.id};renderPredictPage()">${md.label}</button>`
+  ).join('');
+
+  // Fixture rows
+  const SCORE_OPTS=[{a:2,b:0},{a:2,b:1},{a:1,b:2},{a:0,b:2}];
+  let fixturesHtml='';
+  if(!mdFixtures.length){
+    fixturesHtml='<div style="color:var(--muted);font-size:12px;padding:16px 0">No fixtures for this matchday</div>';
+  } else {
+    fixturesHtml=mdFixtures.map(fx=>{
+      const pred=predMap[fx.id];
+      const hasResult=fx.result_a!=null&&fx.result_b!=null;
+
+      if(locked||hasResult){
+        // Results view
+        const predStr=pred?`${pred.score_a}-${pred.score_b}`:'No pick';
+        const resultStr=hasResult?`${fx.result_a}-${fx.result_b}`:'TBD';
+        const pts=pred?.points_earned;
+        const ptsColor=pts>0?'#4ade80':'var(--muted)';
+        return `<div class="card" style="padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:140px">
+            <div style="font-size:13px;font-weight:600">${fx.team_a} <span style="color:var(--muted);font-weight:400">vs</span> ${fx.team_b}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">Your pick: <strong>${predStr}</strong>${pred?.is_doubled?' · <span style="color:var(--gold)">×2</span>':''}</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Result</div>
+            <div style="font-size:20px;font-weight:700;color:var(--accent)">${resultStr}</div>
+          </div>
+          <div style="text-align:right;min-width:48px">
+            <div style="font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:2px">Pts</div>
+            <div style="font-size:22px;font-weight:700;color:${ptsColor}">${pts!=null?pts:'—'}</div>
+          </div>
+        </div>`;
+      }
+
+      // Prediction form
+      const isDoubled=pred?.is_doubled||false;
+      const scoreBtns=SCORE_OPTS.map(s=>{
+        const sel=pred&&pred.score_a===s.a&&pred.score_b===s.b;
+        return `<button onclick="setPredScore(${fx.id},${s.a},${s.b})"
+          data-pred-fix="${fx.id}" data-sa="${s.a}" data-sb="${s.b}"
+          class="btn-sm ${sel?'btn-edit':''}">${s.a}-${s.b}</button>`;
+      }).join('');
+
+      return `<div class="card" style="padding:14px 16px;margin-bottom:8px">
+        <div style="font-size:12px;font-weight:600;margin-bottom:10px">${fx.team_a} <span style="color:var(--muted);font-weight:400">vs</span> ${fx.team_b}</div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <input type="hidden" id="pa_${fx.id}" value="${pred?.score_a??''}">
+          <input type="hidden" id="pb_${fx.id}" value="${pred?.score_b??''}">
+          ${scoreBtns}
+          <button onclick="togglePredDouble(${fx.id},${predMDId})" id="dbl_${fx.id}" data-active="${isDoubled}"
+            class="btn-sm" style="${isDoubled?'background:rgba(255,185,0,0.15);border-color:rgba(255,185,0,0.4);color:var(--gold)':''}">×2</button>
+          <button onclick="submitPrediction(${fx.id},${predMDId})" class="btn-sm btn-edit">Save</button>
+        </div>
+        ${pred?`<div style="font-size:10px;color:var(--muted);margin-top:8px">Saved: ${pred.score_a}-${pred.score_b}${pred.is_doubled?' · <span style="color:var(--gold)">×2</span>':''}</div>`:''}
+      </div>`;
+    }).join('');
+  }
+
+  // Prediction leaderboard
+  const lbHtml=sortedTeams.length?sortedTeams.map((t,i)=>`
+    <div style="display:grid;grid-template-columns:32px 1fr auto;gap:8px;align-items:center;padding:8px 0;border-bottom:0.5px solid var(--border2)">
+      <div style="font-size:13px;font-weight:700;color:${i===0?'var(--gold)':i===1?'#9ca3af':i===2?'#CD7F32':'var(--muted)'}">${i+1}</div>
+      <div><div style="font-size:13px;font-weight:600">${t.team_name}</div><div style="font-size:11px;color:var(--muted)">${t.users?.manager_name||''}</div></div>
+      <div style="font-size:20px;font-weight:700;color:${t.predPts>0?'var(--accent)':'var(--muted)'}">${t.predPts}</div>
+    </div>`).join(''):'<div style="color:var(--muted);font-size:12px;padding:8px 0">No predictions yet</div>';
+
+  const el=document.getElementById('predictContainer'); if(!el) return;
+  el.innerHTML=`
+    <div class="hero" style="padding:40px 20px 28px">
+      <div class="event-tag">🔮 PREDICTIONS</div>
+      <h1>VALO<span>TASY</span><br>PREDICT</h1>
+      <div class="hero-sub">PREDICT MATCH SCORES · EARN BONUS POINTS</div>
+    </div>
+    <div style="background:rgba(0,212,255,0.05);border:0.5px solid rgba(0,212,255,0.15);padding:10px 14px;border-radius:4px;font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.8">
+      🎯 <strong style="color:var(--text)">Exact score</strong> → 3 pts &nbsp;·&nbsp;
+      ✅ <strong style="color:var(--text)">Correct winner</strong> → 1 pt &nbsp;·&nbsp;
+      ❌ Wrong → 0 pts &nbsp;·&nbsp;
+      <span style="color:var(--gold)">×2</span> one match per matchday
+    </div>
+    <div class="md-nav">${mdNav}</div>
+    <div style="margin-bottom:28px">
+      <div style="font-size:10px;font-weight:600;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;margin-bottom:12px">
+        ${curMD?.label||''} — ${locked?'🔒 Locked':'Open for Predictions'}
+      </div>
+      ${fixturesHtml}
+    </div>
+    <div class="admin-card" style="margin-top:0">
+      <h3>🏆 Prediction Standings</h3>
+      <div>${lbHtml}</div>
+    </div>`;
+}
+
+function setPredScore(fxId, scoreA, scoreB){
+  document.getElementById('pa_'+fxId).value=scoreA;
+  document.getElementById('pb_'+fxId).value=scoreB;
+  document.querySelectorAll(`[data-pred-fix="${fxId}"]`).forEach(b=>{
+    b.classList.toggle('btn-edit', b.dataset.sa==scoreA&&b.dataset.sb==scoreB);
+  });
+}
+
+function togglePredDouble(fxId, mdId){
+  const btn=document.getElementById('dbl_'+fxId); if(!btn) return;
+  const isActive=btn.dataset.active==='true';
+  // Clear x2 from all other fixtures in this MD
+  FIXTURES.filter(f=>f.matchday_id===mdId&&f.id!==fxId).forEach(f=>{
+    const ob=document.getElementById('dbl_'+f.id);
+    if(ob){ ob.dataset.active='false'; ob.style.cssText=''; }
+  });
+  btn.dataset.active=isActive?'false':'true';
+  btn.style.cssText=!isActive?'background:rgba(255,185,0,0.15);border-color:rgba(255,185,0,0.4);color:var(--gold)':'';
+}
+
+async function submitPrediction(fxId, mdId){
+  if(!myTeamId){ toast('Please login'); return; }
+  const md=MATCHDAYS.find(m=>m.id===mdId);
+  if(!md?.market_open){ toast('Predictions are locked'); return; }
+  const scoreA=parseInt(document.getElementById('pa_'+fxId)?.value);
+  const scoreB=parseInt(document.getElementById('pb_'+fxId)?.value);
+  if(isNaN(scoreA)||isNaN(scoreB)){ toast('Pick a score first'); return; }
+  const isDoubled=document.getElementById('dbl_'+fxId)?.dataset.active==='true';
+
+  // Clear x2 from other predictions in this MD if doubling this one
+  if(isDoubled){
+    await sb.from('predictions').update({is_doubled:false})
+      .eq('team_id',myTeamId).eq('matchday_id',mdId).neq('fixture_id',fxId);
+  }
+  const {error}=await sb.from('predictions').upsert({
+    team_id:myTeamId, fixture_id:fxId, matchday_id:mdId,
+    tournament_id:TOURNAMENT.id, score_a:scoreA, score_b:scoreB, is_doubled:isDoubled,
+  },{onConflict:'team_id,fixture_id'});
+  if(error){ toast('Error saving prediction'); console.error(error); return; }
+  toast('Prediction saved ✓');
+  renderPredictPage();
 }
 
 function renderSchedulePage(){

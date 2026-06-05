@@ -267,6 +267,30 @@ CREATE POLICY "public_access" ON fixtures FOR ALL USING (true) WITH CHECK (true)
 -- Link processed_matches back to the fixture that triggered scoring
 ALTER TABLE processed_matches ADD COLUMN IF NOT EXISTS fixture_id BIGINT REFERENCES fixtures(id) ON DELETE SET NULL;
 
+-- Actual result stored when match is scored (used for prediction evaluation)
+ALTER TABLE fixtures ADD COLUMN IF NOT EXISTS result_a INTEGER;
+ALTER TABLE fixtures ADD COLUMN IF NOT EXISTS result_b INTEGER;
+
+
+-- ── 13. PREDICTIONS ─────────────────────────────────────────────
+-- One row per team per fixture — user's predicted score
+CREATE TABLE IF NOT EXISTS predictions (
+  id            BIGSERIAL PRIMARY KEY,
+  team_id       UUID   NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  fixture_id    BIGINT NOT NULL REFERENCES fixtures(id) ON DELETE CASCADE,
+  matchday_id   BIGINT NOT NULL REFERENCES matchdays(id) ON DELETE CASCADE,
+  tournament_id TEXT   NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  score_a       INTEGER NOT NULL,         -- predicted score for team_a
+  score_b       INTEGER NOT NULL,         -- predicted score for team_b
+  is_doubled    BOOLEAN DEFAULT FALSE,    -- x2 multiplier (one per matchday)
+  points_earned INTEGER,                  -- NULL until evaluated after match
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (team_id, fixture_id)
+);
+
+ALTER TABLE predictions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_access" ON predictions FOR ALL USING (true) WITH CHECK (true);
+
 
 -- ── SCORING REFERENCE (comment only) ────────────────────────────
 -- Every 10 kills  → +1 pt

@@ -86,13 +86,15 @@ interface PlayerStats {
   cleanSheetWin: boolean;
 }
 
-function scrapeOverview(html: string): { stats: Record<string, PlayerStats>; matchId: string } {
+function scrapeOverview(html: string): { stats: Record<string, PlayerStats>; matchId: string; resultA: number; resultB: number } {
   // Find series score for winner / clean sheet
   let winnerTeamIdx = -1;
   let cleanSheet = false;
+  let resultA = 0, resultB = 0;
   const scoreMatch = html.match(/match-header-vs-score[\s\S]*?(\d+)\s*:\s*(\d+)/);
   if (scoreMatch) {
     const s1 = parseInt(scoreMatch[1]), s2 = parseInt(scoreMatch[2]);
+    resultA = s1; resultB = s2;
     if (s1 > s2) { winnerTeamIdx = 0; cleanSheet = s2 === 0; }
     else if (s2 > s1) { winnerTeamIdx = 1; cleanSheet = s1 === 0; }
   }
@@ -160,7 +162,7 @@ function scrapeOverview(html: string): { stats: Record<string, PlayerStats>; mat
     }
   });
 
-  return { stats, matchId: "" };
+  return { stats, matchId: "", resultA, resultB };
 }
 
 function scrapePerformance(html: string, stats: Record<string, PlayerStats>): void {
@@ -266,7 +268,7 @@ Deno.serve(async (req) => {
     ]);
 
     // Parse
-    const { stats } = scrapeOverview(ovHtml);
+    const { stats, resultA, resultB } = scrapeOverview(ovHtml);
     if (!Object.keys(stats).length) return json({ error: "No player data found — match may not be finished" }, 422);
     scrapePerformance(perfHtml, stats);
 
@@ -476,9 +478,34 @@ Deno.serve(async (req) => {
     // Mark match as processed (link to fixture if provided)
     await sb.from("processed_matches").insert({ match_id: matchId, tournament_id, matchday_id, fixture_id: fixture_id ?? null });
 
-    // Mark fixture as completed
+    // Mark fixture as completed and store actual result
     if (fixture_id) {
-      await sb.from("fixtures").update({ status: "completed", vlr_match_url: match_url }).eq("id", fixture_id);
+      await sb.from("fixtures").update({
+        status: "completed",
+        vlr_match_url: match_url,
+        result_a: resultA,
+        result_b: resultB,
+      }).eq("id", fixture_id);
+
+      // Evaluate predictions for this fixture
+      const { data: fixturePreds } = await sb
+        .from("predictions")
+        .select("id, score_a, score_b, is_doubled")
+        .eq("fixture_id", fixture_id);
+
+      for (const pred of (fixturePreds ?? [])) {
+        let pts = 0;
+        if (pred.score_a === resultA && pred.score_b === resultB) {
+          pts = 3; // exact score
+        } else if (
+          (pred.score_a > pred.score_b && resultA > resultB) ||
+          (pred.score_b > pred.score_a && resultB > resultA)
+        ) {
+          pts = 1; // correct winner
+        }
+        if (pred.is_doubled) pts *= 2;
+        await sb.from("predictions").update({ points_earned: pts }).eq("id", pred.id);
+      }
     }
 
     return json({

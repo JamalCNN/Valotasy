@@ -856,16 +856,31 @@ async function scoreFixture(fxId, mdId){
 
 // ===== PREDICTIONS =====
 async function renderPredictPage(){
+  const el=document.getElementById('predictContainer');
+  if(!el) return;
+
   if(!currentUser){ showLogin(); return; }
-  if(!myTeamId) return;
+
+  el.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted);font-size:12px;letter-spacing:1px">Loading...</div>';
+
+  if(!myTeamId){
+    el.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted)">Could not load team — please refresh</div>';
+    return;
+  }
+
   if(!predMDId) predMDId = currentMDId || MATCHDAYS[0]?.id;
 
+  try{
   // Load user's predictions and all prediction totals in parallel
-  const [{data:myPreds},{data:allPreds},{data:allTeams}] = await Promise.all([
+  const [{data:myPreds,error:e1},{data:allPreds},{data:allTeams}] = await Promise.all([
     sb.from('predictions').select('*').eq('team_id',myTeamId).eq('tournament_id',TOURNAMENT.id),
     sb.from('predictions').select('team_id,points_earned').eq('tournament_id',TOURNAMENT.id),
     sb.from('teams').select('id,team_name,users!inner(manager_name)').eq('tournament_id',TOURNAMENT.id),
   ]);
+  if(e1){
+    el.innerHTML=`<div style="text-align:center;padding:60px;color:var(--red);font-size:12px">DB error: ${e1.message}<br><br>Have you run the SQL to create the predictions table?</div>`;
+    return;
+  }
 
   const predMap={};
   for(const p of (myPreds||[])) predMap[p.fixture_id]=p;
@@ -972,6 +987,10 @@ async function renderPredictPage(){
       <h3>🏆 Prediction Standings</h3>
       <div>${lbHtml}</div>
     </div>`;
+  } catch(e) {
+    el.innerHTML=`<div style="text-align:center;padding:60px;color:var(--red);font-size:12px">Error: ${e.message}</div>`;
+    console.error('renderPredictPage:', e);
+  }
 }
 
 function setPredScore(fxId, scoreA, scoreB){

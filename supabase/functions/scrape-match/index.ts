@@ -241,7 +241,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { match_url, matchday_id, tournament_id } = await req.json();
+    const { match_url, matchday_id, tournament_id, fixture_id } = await req.json();
     if (!match_url || !matchday_id || !tournament_id) {
       return json({ error: "match_url, matchday_id, tournament_id are required" }, 400);
     }
@@ -469,8 +469,13 @@ Deno.serve(async (req) => {
       await sb.from("teams").update({ total_points: total }).eq("id", teamId);
     }
 
-    // Mark match as processed
-    await sb.from("processed_matches").insert({ match_id: matchId, tournament_id, matchday_id });
+    // Mark match as processed (link to fixture if provided)
+    await sb.from("processed_matches").insert({ match_id: matchId, tournament_id, matchday_id, fixture_id: fixture_id ?? null });
+
+    // Mark fixture as completed
+    if (fixture_id) {
+      await sb.from("fixtures").update({ status: "completed", vlr_match_url: match_url }).eq("id", fixture_id);
+    }
 
     return json({
       ok: true,

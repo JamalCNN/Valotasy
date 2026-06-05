@@ -92,6 +92,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let TOURNAMENT = null;
 let MATCHDAYS  = [];
 let PLAYERS    = [];
+let FIXTURES   = [];
 let currentMDId = null;
 let lbMDId      = null;
 let _countdownTimer = null;
@@ -116,12 +117,14 @@ async function loadAppData(){
   const {data:tourney} = await sb.from('tournaments').select('*').eq('status','active').single();
   if(!tourney){ console.error('No active tournament'); return false; }
   TOURNAMENT = tourney;
-  const [{data:mds},{data:players}] = await Promise.all([
+  const [{data:mds},{data:players},{data:fixtures}] = await Promise.all([
     sb.from('matchdays').select('*').eq('tournament_id',tourney.id).order('matchday_number'),
     sb.from('players').select('*').eq('tournament_id',tourney.id).order('name'),
+    sb.from('fixtures').select('*').eq('tournament_id',tourney.id).order('scheduled_time'),
   ]);
   MATCHDAYS = mds||[];
   PLAYERS   = players||[];
+  FIXTURES  = fixtures||[];
   const openMD = [...MATCHDAYS].reverse().find(m=>m.market_open);
   const lastMD = MATCHDAYS[MATCHDAYS.length-1];
   currentMDId = openMD?.id || lastMD?.id || null;
@@ -186,6 +189,18 @@ function subscribeRealtime(){
     .on('postgres_changes',{event:'*',schema:'public',table:'matchdays'},(payload)=>{
       loadAppData().then(()=>{ renderLB(); if(currentUser) renderTeamPage(); });
     })
+    .on('postgres_changes',{event:'*',schema:'public',table:'fixtures'},(payload)=>{
+      const ev=payload.eventType;
+      if(ev==='INSERT'&&payload.new) FIXTURES.push(payload.new);
+      else if(ev==='UPDATE'&&payload.new){
+        const idx=FIXTURES.findIndex(f=>f.id===payload.new.id);
+        if(idx>=0) FIXTURES[idx]=payload.new; else FIXTURES.push(payload.new);
+      } else if(ev==='DELETE'&&payload.old){
+        FIXTURES=FIXTURES.filter(f=>f.id!==payload.old.id);
+      }
+      const active=document.querySelector('.page.active');
+      if(active?.id==='page-schedule') renderSchedulePage();
+    })
     .subscribe();
 }
 
@@ -199,7 +214,7 @@ function toast(msg,dur=2200){
 function goPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
-  const map={lb:0,team:1,players:2,rules:3};
+  const map={lb:0,team:1,players:2,rules:3,schedule:4};
   document.querySelectorAll('.nav-tab')[map[id]].classList.add('active');
   if(id==='team'&&!currentUser){
     showLogin();
@@ -211,8 +226,9 @@ function goPage(id){
   document.getElementById('page-'+id).classList.add('active');
   if(id==='lb'){ renderLB(); startCountdown(); }
   else stopCountdown();
-  if(id==='team')  renderTeamPage();
+  if(id==='team')    renderTeamPage();
   if(id==='players') renderPlayersPage();
+  if(id==='schedule') renderSchedulePage();
 }
 
 // ===== LEADERBOARD =====
@@ -675,90 +691,78 @@ function showAdminContent(){
   renderAdminPlayers();
   renderAdminMatchdays();
   renderTeamListAdmin();
-  populateFetchMDSelect();
   // Populate tournament settings
   document.getElementById('setPassword').value='';
   document.getElementById('setBudget').value=TOURNAMENT?.budget||100;
   document.getElementById('setPenalty').value=TOURNAMENT?.transfer_penalty||8;
 }
 
-function populateFetchMDSelect(){
-  const sel=document.getElementById('fetchMDSelect');
-  if(!sel) return;
-  sel.innerHTML=MATCHDAYS.map(md=>`<option value="${md.id}">${md.label}</option>`).join('');
-  // Default to current matchday
-  if(currentMDId) sel.value=currentMDId;
-}
-
-async function fetchMatch(){
-  const url=document.getElementById('fetchURL').value.trim();
-  const mdId=parseInt(document.getElementById('fetchMDSelect').value);
-  const resultEl=document.getElementById('fetchResult');
-  if(!url){toast('Please enter a VLR match URL');return;}
-  resultEl.textContent='⏳ Fetching match data...';
-  resultEl.style.color='var(--muted)';
-  try{
-    const res=await fetch(`${SUPABASE_URL}/functions/v1/scrape-match`,{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json'},
-      body:JSON.stringify({match_url:url,matchday_id:mdId,tournament_id:TOURNAMENT.id}),
-    });
-    const data=await res.json();
-    if(data.ok){
-      resultEl.textContent=`✅ Match ${data.matchId}: ${data.players} players parsed, ${data.teamsScored} teams scored`;
-      resultEl.style.color='#4ade80';
-      toast(`Match imported ✓ — ${data.teamsScored} teams scored`);
-      renderLB();
-    } else {
-      resultEl.textContent='❌ '+data.error;
-      resultEl.style.color='var(--red)';
-      toast(data.error);
-    }
-  } catch(e){
-    resultEl.textContent='❌ Network error: '+e.message;
-    resultEl.style.color='var(--red)';
-  }
-}
-
 function renderAdminMatchdays(){
   const el=document.getElementById('mdAdminList'); if(!el) return;
   el.innerHTML=MATCHDAYS.map(md=>{
     const dlDisplay = md.deadline ? new Date(md.deadline).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    const mdFixtures = FIXTURES.filter(f=>f.matchday_id===md.id);
+
+    const fixtureRows = mdFixtures.length ? mdFixtures.map(fx=>{
+      const timeStr = fx.scheduled_time ? new Date(fx.scheduled_time).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : 'TBD';
+      const done = fx.status==='completed';
+      return `<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:0.5px solid rgba(255,255,255,0.04);flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:600;flex:1;min-width:140px">${fx.team_a} <span style="color:var(--muted);font-weight:400">vs</span> ${fx.team_b} <span style="color:var(--muted);font-size:10px">· ${timeStr}</span></span>
+        <span style="font-size:9px;padding:2px 6px;border-radius:2px;white-space:nowrap;background:${done?'rgba(74,222,128,0.12)':'rgba(255,255,255,0.05)'};color:${done?'#4ade80':'var(--muted)'}">${done?'SCORED':'SCHEDULED'}</span>
+        <input id="fx_url_${fx.id}" value="${fx.vlr_match_url||''}" placeholder="VLR.gg URL..." ${done?'disabled':''} style="background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:4px 8px;font-size:11px;outline:none;border-radius:3px;width:180px;${done?'opacity:0.4':''}">
+        <button onclick="scoreFixture(${fx.id},${md.id})" class="btn-sm ${done?'':'btn-edit'}" ${done?'disabled':''} style="${done?'opacity:0.4':''}">⚡</button>
+        <button onclick="deleteFixture(${fx.id})" class="btn-sm btn-del">✕</button>
+      </div>`;
+    }).join('') : `<div style="font-size:11px;color:var(--muted);padding:6px 0">No fixtures yet</div>`;
+
     return `
-    <div style="padding:10px 0;border-bottom:0.5px solid var(--border2)">
+    <div style="padding:12px 0;border-bottom:0.5px solid var(--border2)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <span style="font-size:12px;font-weight:600">${md.label}</span>
         <span style="font-size:9px;color:var(--muted)">${md.phase}</span>
         <span style="font-size:9px;padding:2px 6px;border-radius:2px;background:${md.market_open?'rgba(74,222,128,0.15)':'rgba(255,70,85,0.1)'};color:${md.market_open?'#4ade80':'var(--red)'}">${md.market_open?'OPEN':'LOCKED'}</span>
         <button onclick="setMarket(${md.id},${!md.market_open})" class="btn-sm ${md.market_open?'btn-del':'btn-edit'}" style="margin-left:auto">${md.market_open?'🔒 Lock':'🔓 Open'}</button>
       </div>
-      <div style="display:flex;gap:6px;align-items:center">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:${dlDisplay?'4px':'8px'}">
         <span style="font-size:10px;font-weight:500;letter-spacing:0.5px;color:var(--muted);text-transform:uppercase;white-space:nowrap">⏰ Deadline</span>
         <input readonly id="dl_${md.id}" placeholder="Pick date & time..."
           style="flex:1;background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:5px 10px;font-size:12px;outline:none;border-radius:3px;cursor:pointer">
         <button onclick="setDeadline(${md.id})" class="btn-sm btn-edit" style="white-space:nowrap">Set</button>
         ${md.deadline?`<button onclick="clearDeadline(${md.id})" class="btn-sm btn-del" style="white-space:nowrap">Clear</button>`:''}
       </div>
-      ${dlDisplay?`<div style="font-size:10px;color:var(--muted);margin-top:5px">📅 ${dlDisplay}</div>`:''}
+      ${dlDisplay?`<div style="font-size:10px;color:var(--muted);margin-bottom:10px">📅 ${dlDisplay}</div>`:''}
+      <div style="font-size:10px;font-weight:600;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">🎮 Fixtures</div>
+      <div>${fixtureRows}</div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
+        <input id="fx_a_${md.id}" placeholder="Team A" style="background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:5px 8px;font-size:12px;outline:none;border-radius:3px;flex:1;min-width:90px">
+        <span style="color:var(--muted);font-size:11px;white-space:nowrap">vs</span>
+        <input id="fx_b_${md.id}" placeholder="Team B" style="background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:5px 8px;font-size:12px;outline:none;border-radius:3px;flex:1;min-width:90px">
+        <input readonly id="fx_t_${md.id}" placeholder="Date & time..." style="background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:5px 8px;font-size:12px;outline:none;border-radius:3px;flex:1;min-width:120px;cursor:pointer">
+        <button onclick="addFixture(${md.id})" class="btn-sm btn-edit">+ Add</button>
+      </div>
     </div>`;
   }).join('');
 
-  // Init Flatpickr on each deadline input
+  // Init Flatpickr on deadline inputs
   MATCHDAYS.forEach(md=>{
     const input = document.getElementById('dl_'+md.id);
     if(!input) return;
     flatpickr(input, {
-      enableTime: true,
-      time_24hr: true,
-      dateFormat: 'Y-m-dTH:i',
-      altInput: true,
-      altFormat: 'd M Y — H:i',
-      defaultDate: md.deadline||null,
-      disableMobile: false,
-      theme: 'dark',
-      onChange(selectedDates, dateStr){
-        input._selectedDate = dateStr;
-      },
+      enableTime: true, time_24hr: true, dateFormat: 'Y-m-dTH:i',
+      altInput: true, altFormat: 'd M Y — H:i',
+      defaultDate: md.deadline||null, disableMobile: false, theme: 'dark',
+      onChange(selectedDates, dateStr){ input._selectedDate = dateStr; },
+    });
+  });
+
+  // Init Flatpickr on fixture time inputs
+  MATCHDAYS.forEach(md=>{
+    const input = document.getElementById('fx_t_'+md.id);
+    if(!input) return;
+    flatpickr(input, {
+      enableTime: true, time_24hr: true, dateFormat: 'Y-m-dTH:i',
+      altInput: true, altFormat: 'd M Y — H:i',
+      disableMobile: false, theme: 'dark',
     });
   });
 }
@@ -788,6 +792,94 @@ async function clearDeadline(mdId){
   const md=MATCHDAYS.find(m=>m.id===mdId); if(md) md.deadline=null;
   renderAdminMatchdays();
   toast('Deadline cleared ✓');
+}
+
+async function addFixture(mdId){
+  const teamA=document.getElementById('fx_a_'+mdId)?.value.trim();
+  const teamB=document.getElementById('fx_b_'+mdId)?.value.trim();
+  if(!teamA||!teamB){toast('Enter both team names');return;}
+  const timeInput=document.getElementById('fx_t_'+mdId);
+  const scheduledTime=timeInput?._flatpickr?.latestSelectedDateObj?.toISOString()||null;
+  const {data,error}=await sb.from('fixtures').insert({
+    matchday_id:mdId, tournament_id:TOURNAMENT.id,
+    team_a:teamA, team_b:teamB, scheduled_time:scheduledTime, status:'scheduled',
+  }).select().single();
+  if(error){toast('Error adding fixture');console.error(error);return;}
+  FIXTURES.push(data);
+  document.getElementById('fx_a_'+mdId).value='';
+  document.getElementById('fx_b_'+mdId).value='';
+  renderAdminMatchdays();
+  toast('Fixture added ✓');
+}
+
+async function deleteFixture(fxId){
+  if(!confirm('Delete this fixture?')) return;
+  await sb.from('fixtures').delete().eq('id',fxId);
+  FIXTURES=FIXTURES.filter(f=>f.id!==fxId);
+  renderAdminMatchdays();
+  toast('Fixture deleted ✓');
+}
+
+async function scoreFixture(fxId, mdId){
+  const urlInput=document.getElementById('fx_url_'+fxId);
+  const url=urlInput?.value.trim();
+  if(!url){toast('Enter VLR.gg match URL first');return;}
+  const fx=FIXTURES.find(f=>f.id===fxId);
+  if(fx?.status==='completed'){toast('Already scored');return;}
+  toast('⏳ Scoring match...');
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/scrape-match`,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({match_url:url,matchday_id:mdId,tournament_id:TOURNAMENT.id,fixture_id:fxId}),
+    });
+    const data=await res.json();
+    if(data.ok){
+      if(fx){fx.status='completed';fx.vlr_match_url=url;}
+      renderAdminMatchdays();
+      renderLB();
+      toast(`Scored ✓ — ${data.teamsScored} teams updated`);
+    } else {
+      toast('❌ '+data.error);
+    }
+  } catch(e){
+    toast('Network error: '+e.message);
+  }
+}
+
+function renderSchedulePage(){
+  const el=document.getElementById('scheduleContainer'); if(!el) return;
+  const statusColor={scheduled:'var(--muted)',live:'#4ade80',completed:'var(--accent)'};
+  const statusLabel={scheduled:'Upcoming',live:'LIVE',completed:'Completed'};
+  const html=MATCHDAYS.map(md=>{
+    const mdFixtures=FIXTURES.filter(f=>f.matchday_id===md.id);
+    const fixtureHtml=mdFixtures.length?mdFixtures.map(fx=>{
+      const timeStr=fx.scheduled_time
+        ?new Date(fx.scheduled_time).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})
+        :'TBD';
+      const s=fx.status||'scheduled';
+      return `<div class="card" style="padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px">
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:600">${fx.team_a} <span style="color:var(--muted);font-weight:400">vs</span> ${fx.team_b}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">⏰ ${timeStr}</div>
+        </div>
+        <span style="font-size:9px;font-weight:600;letter-spacing:1px;padding:3px 8px;border-radius:2px;white-space:nowrap;background:${s==='completed'?'rgba(0,212,255,0.08)':s==='live'?'rgba(74,222,128,0.12)':'rgba(255,255,255,0.05)'};color:${statusColor[s]||'var(--muted)'}">${statusLabel[s]||'Upcoming'}</span>
+      </div>`;
+    }).join(''):`<div style="font-size:12px;color:var(--muted);padding:8px 0">No fixtures scheduled yet</div>`;
+    return `<div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:0.5px solid var(--border2)">
+        <span style="font-size:13px;font-weight:700;letter-spacing:1px">${md.label}</span>
+        <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">${md.phase}</span>
+      </div>
+      ${fixtureHtml}
+    </div>`;
+  }).join('');
+  el.innerHTML=`<div class="hero" style="padding:40px 20px 28px">
+    <div class="event-tag">📅 MATCH SCHEDULE</div>
+    <h1>VALO<span>TASY</span><br>SCHEDULE</h1>
+    <div class="hero-sub">VCT MASTERS LONDON 2026</div>
+  </div>
+  <div>${html||'<div style="text-align:center;padding:40px;color:var(--muted)">No fixtures scheduled yet</div>'}</div>`;
 }
 
 async function addPlayer(){

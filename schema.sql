@@ -247,6 +247,27 @@ ALTER TABLE score_logs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "public_access" ON score_logs FOR ALL USING (true) WITH CHECK (true);
 
 
+-- ── 12. FIXTURES ────────────────────────────────────────────────
+-- Scheduled matches within a matchday — drives scoring flow
+CREATE TABLE IF NOT EXISTS fixtures (
+  id              BIGSERIAL PRIMARY KEY,
+  matchday_id     BIGINT NOT NULL REFERENCES matchdays(id) ON DELETE CASCADE,
+  tournament_id   TEXT NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  team_a          TEXT NOT NULL,
+  team_b          TEXT NOT NULL,
+  scheduled_time  TIMESTAMPTZ,
+  vlr_match_url   TEXT,
+  status          TEXT DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'live', 'completed')),
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE fixtures ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_access" ON fixtures FOR ALL USING (true) WITH CHECK (true);
+
+-- Link processed_matches back to the fixture that triggered scoring
+ALTER TABLE processed_matches ADD COLUMN IF NOT EXISTS fixture_id BIGINT REFERENCES fixtures(id) ON DELETE SET NULL;
+
+
 -- ── SCORING REFERENCE (comment only) ────────────────────────────
 -- Every 10 kills  → +1 pt
 -- 4K              → +3 pts

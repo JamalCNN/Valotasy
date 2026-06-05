@@ -21,6 +21,7 @@
     <button class="nav-tab" onclick="goPage('team')">My Team</button>
     <button class="nav-tab" onclick="goPage('players')">Players</button>
     <button class="nav-tab" onclick="goPage('rules')">Rules</button>
+    <button class="nav-tab" onclick="goPage('schedule')">Schedule</button>
   </div>
   <div class="nav-right">
     <div style="display:none;align-items:center;gap:8px" id="navUserBadge">
@@ -84,15 +85,8 @@
             <button class="btn btn-red" onclick="addPlayer()" style="width:100%">Add Player</button>
           </div>
           <div class="admin-card">
-            <h3>🌐 Fetch Match from VLR.gg</h3>
-            <div class="form-group"><label>Matchday</label>
-              <select id="fetchMDSelect"></select>
-            </div>
-            <div class="form-group"><label>VLR.gg Match URL</label>
-              <input id="fetchURL" placeholder="https://www.vlr.gg/12345/team-a-vs-team-b">
-            </div>
-            <button class="btn btn-red" onclick="fetchMatch()" style="width:100%">⚡ Fetch & Auto-Score</button>
-            <div id="fetchResult" style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.5"></div>
+            <h3>🎮 Scoring</h3>
+            <p style="font-size:12px;color:var(--muted);line-height:1.6;margin:0">Add fixtures to each Matchday below, then paste the VLR.gg match URL and click ⚡ to score.</p>
           </div>
         </div>
 
@@ -261,6 +255,11 @@
     </div>
     <div id="playersGrid"></div>
   </div>
+</div>
+
+<!-- PAGE: SCHEDULE -->
+<div class="page" id="page-schedule">
+  <div class="container" id="scheduleContainer"></div>
 </div>
 
 <!-- PAGE: RULES -->

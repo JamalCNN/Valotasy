@@ -495,15 +495,24 @@ Deno.serve(async (req) => {
 
       for (const pred of (fixturePreds ?? [])) {
         let pts = 0;
+
+        // Base: exact score = 3, correct winner = 1, wrong = 0
         if (pred.score_a === resultA && pred.score_b === resultB) {
-          pts = 3; // exact score
+          pts = 3;
         } else if (
           (pred.score_a > pred.score_b && resultA > resultB) ||
           (pred.score_b > pred.score_a && resultB > resultA)
         ) {
-          pts = 1; // correct winner
+          pts = 1;
         }
+
+        // Sub-scoring: +1 for each team's exact map count predicted correctly
+        if (pred.score_a === resultA) pts += 1;
+        if (pred.score_b === resultB) pts += 1;
+
+        // x2 multiplies the full total
         if (pred.is_doubled) pts *= 2;
+
         await sb.from("predictions").update({ points_earned: pts }).eq("id", pred.id);
       }
     }

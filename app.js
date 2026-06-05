@@ -971,11 +971,11 @@ async function renderPredictPage(){
       <h1>VALO<span>TASY</span><br>PREDICT</h1>
       <div class="hero-sub">PREDICT MATCH SCORES · EARN BONUS POINTS</div>
     </div>
-    <div style="background:rgba(0,212,255,0.05);border:0.5px solid rgba(0,212,255,0.15);padding:10px 14px;border-radius:4px;font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.8">
-      🎯 <strong style="color:var(--text)">Exact score</strong> → 3 pts &nbsp;·&nbsp;
-      ✅ <strong style="color:var(--text)">Correct winner</strong> → 1 pt &nbsp;·&nbsp;
-      ❌ Wrong → 0 pts &nbsp;·&nbsp;
-      <span style="color:var(--gold)">×2</span> one match per matchday
+    <div style="background:rgba(0,212,255,0.05);border:0.5px solid rgba(0,212,255,0.15);padding:10px 14px;border-radius:4px;font-size:11px;color:var(--muted);margin-bottom:16px;line-height:2">
+      🎯 <strong style="color:var(--text)">Exact score</strong> → 3 pts + 1 pt per correct team score = up to <strong style="color:var(--accent)">5 pts</strong><br>
+      ✅ <strong style="color:var(--text)">Correct winner</strong> → 1 pt + 1 pt per correct team score = up to <strong style="color:var(--accent)">3 pts</strong><br>
+      ❌ Wrong winner → +1 pt per correct team score only &nbsp;·&nbsp;
+      <span style="color:var(--gold)">×2</span> multiplies total · one per matchday
     </div>
     <div class="md-nav">${mdNav}</div>
     <div style="margin-bottom:28px">

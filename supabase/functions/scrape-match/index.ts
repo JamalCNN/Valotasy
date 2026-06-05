@@ -270,6 +270,10 @@ Deno.serve(async (req) => {
     if (!Object.keys(stats).length) return json({ error: "No player data found — match may not be finished" }, 422);
     scrapePerformance(perfHtml, stats);
 
+    // Reject if all player stats are zero — match hasn't started yet
+    const hasRealStats = Object.values(stats).some(p => p.kills > 0 || p.acs > 0 || p.rating20 > 0);
+    if (!hasRealStats) return json({ error: "Match hasn't started yet — all player stats are zero" }, 422);
+
     // Rank by Rating 2.0
     const sorted = Object.entries(stats).sort((a, b) => b[1].rating20 - a[1].rating20);
     const ratingRank: Record<string, number> = {};

@@ -937,7 +937,7 @@ async function renderPredictPage(){
         const sel=pred&&pred.score_a===s.a&&pred.score_b===s.b;
         return `<button onclick="setPredScore(${fx.id},${s.a},${s.b})"
           data-pred-fix="${fx.id}" data-sa="${s.a}" data-sb="${s.b}"
-          style="${sel?'background:var(--accent);color:#000;border-color:var(--accent);font-weight:700':''}"
+          style="${sel?'background:var(--accent);color:#000;border-color:var(--accent);font-weight:700':'background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.4)'}"
           class="btn-sm">${s.a}-${s.b}</button>`;
       }).join('');
 
@@ -999,10 +999,10 @@ function setPredScore(fxId, scoreA, scoreB){
   document.getElementById('pb_'+fxId).value=scoreB;
   document.querySelectorAll(`[data-pred-fix="${fxId}"]`).forEach(b=>{
     const isSelected = b.dataset.sa==scoreA && b.dataset.sb==scoreB;
-    b.style.background = isSelected ? 'var(--accent)' : '';
-    b.style.color = isSelected ? '#000' : '';
-    b.style.borderColor = isSelected ? 'var(--accent)' : '';
-    b.style.fontWeight = isSelected ? '700' : '';
+    b.style.background    = isSelected ? 'var(--accent)'              : 'rgba(255,255,255,0.04)';
+    b.style.color         = isSelected ? '#000'                       : 'rgba(255,255,255,0.4)';
+    b.style.borderColor   = isSelected ? 'var(--accent)'              : 'rgba(255,255,255,0.12)';
+    b.style.fontWeight    = isSelected ? '700'                        : '400';
   });
 }
 

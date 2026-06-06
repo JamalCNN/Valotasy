@@ -900,7 +900,7 @@ async function renderPredictPage(){
 
   const curMD=MATCHDAYS.find(m=>m.id===predMDId);
   const mdFixtures=FIXTURES.filter(f=>f.matchday_id===predMDId);
-  const locked=!curMD?.market_open;
+  const locked=isMarketLocked(curMD);
 
   // MD tabs
   const mdNav=MATCHDAYS.map(md=>
@@ -1029,7 +1029,7 @@ function togglePredDouble(fxId, mdId){
 async function submitPrediction(fxId, mdId){
   if(!myTeamId){ toast('Please login'); return; }
   const md=MATCHDAYS.find(m=>m.id===mdId);
-  if(!md?.market_open){ toast('Predictions are locked'); return; }
+  if(isMarketLocked(md)){ toast('Predictions are locked'); return; }
   const scoreA=parseInt(document.getElementById('pa_'+fxId)?.value);
   const scoreB=parseInt(document.getElementById('pb_'+fxId)?.value);
   if(isNaN(scoreA)||isNaN(scoreB)){ toast('Pick a score first'); return; }

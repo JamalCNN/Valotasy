@@ -111,6 +111,14 @@ let mySlotScores   = {}; // {playerId: finalPts} for current MD
 // UI state
 let pickerSlot = null, pickerFilter = 'ALL', playersFilter = 'ALL';
 
+// ===== MARKET LOCK =====
+function isMarketLocked(md){
+  if(!md) return true;
+  if(!md.market_open) return true;                                      // admin locked
+  if(md.deadline && new Date() > new Date(md.deadline)) return true;   // deadline passed
+  return false;
+}
+
 // ===== DATA LOADING =====
 async function loadAppData(){
   document.getElementById('lbBody').innerHTML =
@@ -268,7 +276,7 @@ async function renderLB(){
     body.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted);font-size:12px;letter-spacing:1px;text-transform:uppercase">No teams yet — invite your friends!</div>';
     return;
   }
-  const marketOpen = curMD?.market_open ?? true;
+  const marketOpen = !isMarketLocked(curMD);
   body.innerHTML = teams.map((t,i)=>{
     const gc=i===0?'g1':i===1?'g2':i===2?'g3':'';
     const mdPts = scoreMap[t.id]??0;
@@ -286,7 +294,7 @@ async function renderLB(){
     </div>
     <div class="lb-expand" id="exp${i}">
       <div style="text-align:center;padding:16px;font-size:12px;color:var(--muted);font-family:monospace;letter-spacing:1px">
-        ${marketOpen?'🔒 Squad revealed after deadline':'Click to view squad'}
+        ${marketOpen?'Click to view squad':'🔒 Squad revealed after deadline'}
       </div>
     </div>`;
   }).join('');
@@ -367,7 +375,7 @@ async function expandTeam(expId, teamId){
   const el = document.getElementById(expId);
   if(el.classList.contains('open')){ el.classList.remove('open'); return; }
   const curMD = MATCHDAYS.find(m=>m.id===lbMDId);
-  if(curMD?.market_open){ el.classList.toggle('open'); return; }
+  if(isMarketLocked(curMD)){ el.classList.toggle('open'); return; }
   // Load roster + scores for this team
   const [{data:rosters},{data:logs}] = await Promise.all([
     sb.from('rosters').select('slot,players(id,name,role,vct_team)').eq('team_id',teamId),
@@ -397,7 +405,7 @@ async function renderTeamPage(){
   document.getElementById('myTeamName').value  = myTeamName||'';
   document.getElementById('myManagerName').value = currentUser.manager||'';
   const curMD = MATCHDAYS.find(m=>m.id===currentMDId);
-  const locked = !curMD?.market_open;
+  const locked = isMarketLocked(curMD);
   document.getElementById('lockBanner').innerHTML = locked
     ? '<div class="lock-banner">🔒 Market is closed — transfers not allowed</div>' : '';
   renderDeadlineBanner(curMD);
@@ -457,7 +465,7 @@ function renderSlots(){
 async function removePlayer(slotId){
   const p=myRosters[slotId]; if(!p) return;
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
-  if(!curMD?.market_open){toast('Market is closed — transfers not allowed');return;}
+  if(isMarketLocked(curMD)){toast('Market is closed — transfers not allowed');return;}
   delete myRosters[slotId];
   if(myCaptainId===p.id)  myCaptainId=null;
   if(myCaptain2Id===p.id) myCaptain2Id=null;
@@ -482,7 +490,7 @@ function renderCaptainList(){
 
 async function setCaptain(pid){
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
-  if(!curMD?.market_open){toast('Market is closed');return;}
+  if(isMarketLocked(curMD)){toast('Market is closed');return;}
   if(myChip==='clonecap'){
     if(myCaptainId===pid) myCaptainId=null;
     else if(myCaptain2Id===pid) myCaptain2Id=null;
@@ -507,7 +515,7 @@ function renderChipList(){
 
 async function selectChip(id){
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
-  if(!curMD?.market_open){toast('Market is closed');return;}
+  if(isMarketLocked(curMD)){toast('Market is closed');return;}
   const newChip=myChip===id?null:id;
   if(newChip===null){
     await sb.from('active_chips').delete().eq('team_id',myTeamId).eq('matchday_id',currentMDId);
@@ -549,7 +557,7 @@ function calcMyPts(){
 // ===== PLAYER PICKER =====
 function openPicker(slotId,slotLabel){
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
-  if(!curMD?.market_open){toast('Market is closed — changes not allowed');return;}
+  if(isMarketLocked(curMD)){toast('Market is closed — changes not allowed');return;}
   pickerSlot=slotId; pickerFilter='ALL';
   document.getElementById('pickerTitle').textContent='Pick '+slotLabel;
   document.getElementById('pickerSearch').value='';

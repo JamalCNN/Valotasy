@@ -373,20 +373,43 @@ function renderLBDeadline(){
 async function expandTeam(expId, teamId){
   document.querySelectorAll('.lb-expand').forEach(e=>{ if(e.id!==expId) e.classList.remove('open'); });
   const el = document.getElementById(expId);
+  if(!el) return;
   if(el.classList.contains('open')){ el.classList.remove('open'); return; }
+
   const curMD = MATCHDAYS.find(m=>m.id===lbMDId);
-  if(!isMarketLocked(curMD)){ el.classList.toggle('open'); return; } // market open — hide squads
-  // Load roster + scores for this team
-  const [{data:rosters},{data:logs}] = await Promise.all([
-    sb.from('rosters').select('slot,players(id,name,role,vct_team)').eq('team_id',teamId),
-    sb.from('score_logs').select('player_id,final_pts,is_captain').eq('team_id',teamId).eq('matchday_id',lbMDId),
+  if(!isMarketLocked(curMD)){
+    // Market still open — just show placeholder
+    el.innerHTML='<div style="text-align:center;padding:16px;font-size:12px;color:var(--muted);letter-spacing:1px">🔒 Squad revealed after deadline</div>';
+    el.classList.add('open');
+    return;
+  }
+
+  // Deadline passed — show squad
+  el.innerHTML='<div style="text-align:center;padding:16px;font-size:12px;color:var(--muted)">Loading...</div>';
+  el.classList.add('open');
+
+  // Use separate queries to avoid FK join issues
+  const [{data:rosters},{data:logs},{data:teamRow}] = await Promise.all([
+    sb.from('rosters').select('slot,player_id').eq('team_id',teamId),
+    sb.from('score_logs').select('player_id,final_pts').eq('team_id',teamId).eq('matchday_id',lbMDId),
+    sb.from('teams').select('captain_id,captain2_id').eq('id',teamId).single(),
   ]);
-  const {data:teamRow} = await sb.from('teams').select('captain_id,captain2_id').eq('id',teamId).single();
+
+  const playerIds = (rosters||[]).map(r=>r.player_id).filter(Boolean);
+  const {data:playerList} = playerIds.length
+    ? await sb.from('players').select('id,name,role,vct_team').in('id',playerIds)
+    : {data:[]};
+
+  const playerMap={};
+  for(const p of (playerList||[])) playerMap[p.id]=p;
+
   const logMap={};
   for(const l of (logs||[])) logMap[l.player_id]=(logMap[l.player_id]||0)+l.final_pts;
+
   const chips = document.createElement('div'); chips.className='player-chips';
   for(const r of (rosters||[])){
-    const p=r.players; if(!p) continue;
+    if(!r.player_id) continue;
+    const p=playerMap[r.player_id]; if(!p) continue;
     const pts=logMap[p.id]||0;
     const isCap=teamRow?.captain_id===p.id||teamRow?.captain2_id===p.id;
     chips.innerHTML+=`<div class="pc ${isCap?'cap':''}">
@@ -395,8 +418,12 @@ async function expandTeam(expId, teamId){
       <div class="pc-team">${p.vct_team}</div>
       <div class="pc-pts">${pts} pts</div></div>`;
   }
-  el.innerHTML=''; el.appendChild(chips);
-  el.classList.add('open');
+
+  // Guard: only update if element is still in the DOM (not wiped by re-render)
+  if(document.getElementById(expId)){
+    el.innerHTML='';
+    el.appendChild(chips);
+  }
 }
 
 // ===== MY TEAM =====

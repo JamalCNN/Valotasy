@@ -376,9 +376,12 @@ async function expandTeam(expId, teamId){
   if(!el) return;
   if(el.classList.contains('open')){ el.classList.remove('open'); return; }
 
-  const curMD = MATCHDAYS.find(m=>m.id===lbMDId);
-  if(!isMarketLocked(curMD)){
-    // Market still open — just show placeholder
+  // Always fetch fresh matchday status — don't trust potentially stale MATCHDAYS cache
+  const {data:freshMD} = await sb.from('matchdays').select('market_open,deadline').eq('id',lbMDId).single();
+  const locked = freshMD ? isMarketLocked(freshMD) : true;
+
+  if(!locked){
+    // Market still open — hide squads
     el.innerHTML='<div style="text-align:center;padding:16px;font-size:12px;color:var(--muted);letter-spacing:1px">🔒 Squad revealed after deadline</div>';
     el.classList.add('open');
     return;

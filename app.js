@@ -375,7 +375,7 @@ async function expandTeam(expId, teamId){
   const el = document.getElementById(expId);
   if(el.classList.contains('open')){ el.classList.remove('open'); return; }
   const curMD = MATCHDAYS.find(m=>m.id===lbMDId);
-  if(isMarketLocked(curMD)){ el.classList.toggle('open'); return; }
+  if(!isMarketLocked(curMD)){ el.classList.toggle('open'); return; } // market open — hide squads
   // Load roster + scores for this team
   const [{data:rosters},{data:logs}] = await Promise.all([
     sb.from('rosters').select('slot,players(id,name,role,vct_team)').eq('team_id',teamId),

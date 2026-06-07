@@ -1,0 +1,12 @@
+# Claude / AI tooling
+.agents/
+.claude/
+.mcp.json
+skills-lock.json
+
+# Editor
+.vscode/
+
+# Supabase
+supabase/.temp/
+supabase/functions/deno.json

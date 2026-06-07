@@ -55,6 +55,51 @@ function calculateScore(
   return { rawPts, finalPts };
 }
 
+// ── Debug: per-player score breakdown ───────────────────────────
+function scoreBreakdown(
+  stats: {
+    kills: number; k4: number; k5: number; k6: number; k7: number;
+    clutch_1v2: number; clutch_1v3: number; clutch_1v4: number; clutch_1v5: number;
+    is_winner: boolean; clean_sheet_win: boolean;
+  },
+  ratingRank: number,
+  isLowestRating: boolean,
+  isCaptain: boolean,
+  chip: string | null,
+  topFraggerDoubled = false,
+) {
+  const killPts   = Math.floor(stats.kills / 10);
+  const k4pts     = stats.k4 * 3;
+  const k5pts     = stats.k5 * 4;
+  const k6pts     = stats.k6 * 5;
+  const k7pts     = stats.k7 * 5;
+  const clutch    = stats.clutch_1v2 + stats.clutch_1v3 + stats.clutch_1v4 + stats.clutch_1v5;
+  const clutchPts = clutch;
+  const ratingPts = ratingRank === 1 ? 3 : ratingRank === 2 ? 2 : ratingRank === 3 ? 1 : 0;
+  const lowestPts = isLowestRating ? -3 : 0;
+  const winPts    = stats.is_winner ? 2 : 0;
+  const csPts     = (stats.is_winner && stats.clean_sheet_win) ? 1 : 0;
+  const rawPts    = killPts + k4pts + k5pts + k6pts + k7pts + clutchPts + ratingPts + lowestPts + winPts + csPts;
+
+  let captainMult = 1;
+  if (topFraggerDoubled) captainMult = 2;
+  else if (chip === "triplecap" && isCaptain) captainMult = 3;
+  else if (isCaptain) captainMult = 2;
+
+  return {
+    kills: stats.kills, killPts,
+    k4: stats.k4, k4pts, k5: stats.k5, k5pts, k6: stats.k6, k6pts, k7: stats.k7, k7pts,
+    clutch1v2: stats.clutch_1v2, clutch1v3: stats.clutch_1v3,
+    clutch1v4: stats.clutch_1v4, clutch1v5: stats.clutch_1v5,
+    clutchTotal: clutch, clutchPts,
+    ratingRank, ratingPts,
+    isLowestRating, lowestPts,
+    isWinner: stats.is_winner, winPts,
+    cleanSheet: stats.clean_sheet_win, cleanSheetPts: csPts,
+    rawPts, captainMult, finalPts: rawPts * captainMult,
+  };
+}
+
 // ── VLR HTML parser ──────────────────────────────────────────────
 function parseNum(text: string): number {
   const m = text.replace(/,/g, "").match(/\d+(\.\d+)?/);
@@ -86,28 +131,47 @@ interface PlayerStats {
   cleanSheetWin: boolean;
 }
 
+// Returns the HTML substring belonging to the "All Maps" game section.
+// Uses vm-stats-game[^a-z] to avoid matching vm-stats-gamesnav-item nav tabs.
+function extractAllMapsSection(html: string): string {
+  const m = html.match(/<div[^>]+class="vm-stats-game[^a-z][^"]*"[^>]*data-game-id="all"[^>]*>/);
+  if (!m || m.index == null) return "";
+  const start = m.index;
+  const rest = html.slice(start + m[0].length);
+  const next = rest.match(/<div[^>]+class="vm-stats-game[^a-z][^"]*"[^>]*data-game-id="\d+"[^>]*>/);
+  const end = next?.index != null ? start + m[0].length + next.index : html.length;
+  return html.slice(start, end);
+}
+
 function scrapeOverview(html: string): { stats: Record<string, PlayerStats>; matchId: string; resultA: number; resultB: number } {
-  // Find series score for winner / clean sheet
+  // Parse series score from the explicit loser/winner spans — avoids matching map durations
   let winnerTeamIdx = -1;
   let cleanSheet = false;
   let resultA = 0, resultB = 0;
-  const scoreMatch = html.match(/match-header-vs-score[\s\S]*?(\d+)\s*:\s*(\d+)/);
-  if (scoreMatch) {
-    const s1 = parseInt(scoreMatch[1]), s2 = parseInt(scoreMatch[2]);
-    resultA = s1; resultB = s2;
-    if (s1 > s2) { winnerTeamIdx = 0; cleanSheet = s2 === 0; }
-    else if (s2 > s1) { winnerTeamIdx = 1; cleanSheet = s1 === 0; }
+  const loserM = html.match(/match-header-vs-score-loser[^>]*>\s*(\d+)/);
+  const winnerM = html.match(/match-header-vs-score-winner[^>]*>\s*(\d+)/);
+  if (loserM && winnerM) {
+    const loserScore = parseInt(loserM[1]);
+    const winnerScore = parseInt(winnerM[1]);
+    cleanSheet = loserScore === 0;
+    // Whichever class appears first in the HTML corresponds to the first/left team (table index 0)
+    const loserFirst = html.indexOf("match-header-vs-score-loser") < html.indexOf("match-header-vs-score-winner");
+    if (loserFirst) {
+      resultA = loserScore; resultB = winnerScore; winnerTeamIdx = 1;
+    } else {
+      resultA = winnerScore; resultB = loserScore; winnerTeamIdx = 0;
+    }
   }
 
-  // Parse all wf-table-inset mod-overview tables (one per team)
+  // Isolate the All Maps section so we don't accidentally parse per-map tables
+  const allHtml = extractAllMapsSection(html);
+  if (!allHtml) return { stats: {}, matchId: "", resultA, resultB };
+
+  // Parse the two mod-overview tables inside the All Maps section (one per team)
   const stats: Record<string, PlayerStats> = {};
   const tableRegex = /<table[^>]*class="[^"]*wf-table-inset mod-overview[^"]*"[\s\S]*?<\/table>/g;
-  const tables = [...html.matchAll(tableRegex)];
-
-  // Only keep tables that contain actual game data (data-game-id="all" section)
-  // We look at the last two matching tables (one per team) from the all-maps section
-  const gameTables = tables.filter(m => m[0].includes("text-of"));
-  const teamTables = gameTables.slice(-2); // last two = all-maps aggregated
+  const tables = [...allHtml.matchAll(tableRegex)];
+  const teamTables = tables.slice(0, 2); // first two = team A and team B in All Maps
 
   teamTables.forEach((match, tIdx) => {
     const isWinner = tIdx === winnerTeamIdx;
@@ -166,23 +230,18 @@ function scrapeOverview(html: string): { stats: Record<string, PlayerStats>; mat
 }
 
 function scrapePerformance(html: string, stats: Record<string, PlayerStats>): void {
-  // Find the LAST mod-adv-stats table — that's the all-maps aggregate
-  const tag = "mod-adv-stats";
-  const lower = html.toLowerCase();
-  let lastTagIdx = -1;
-  let si = 0;
-  while (si < lower.length) {
-    const i = lower.indexOf(tag, si);
-    if (i < 0) break;
-    lastTagIdx = i;
-    si = i + 1;
-  }
-  if (lastTagIdx < 0) return;
+  // Isolate the All Maps section — the FIRST mod-adv-stats inside it is the aggregate table
+  const allHtml = extractAllMapsSection(html);
+  if (!allHtml) return;
 
-  const tableStart = html.lastIndexOf("<table", lastTagIdx);
-  const tableEnd = html.indexOf("</table>", lastTagIdx);
+  const tag = "mod-adv-stats";
+  const tagIdx = allHtml.toLowerCase().indexOf(tag);
+  if (tagIdx < 0) return;
+
+  const tableStart = allHtml.lastIndexOf("<table", tagIdx);
+  const tableEnd = allHtml.indexOf("</table>", tagIdx);
   if (tableStart < 0 || tableEnd < 0) return;
-  const table = html.substring(tableStart, tableEnd + 8);
+  const table = allHtml.substring(tableStart, tableEnd + 8);
 
   // Parse header row (table has no <tbody> — just <tr> elements directly)
   const allRows = [...table.matchAll(/<tr[\s\S]*?<\/tr>/g)];
@@ -363,8 +422,36 @@ Deno.serve(async (req) => {
     const scoreLogs: any[] = [];
     const matchdayScores: Record<string, { raw: number; penalty: number }> = {};
 
+    // Debug calc log — returned in response for inspection
+    const calcLog: Record<string, any> = {
+      lowestRatedPlayer: lowestNk,
+      ratingRanks: ratingRank,
+      playerRawStats: Object.fromEntries(Object.entries(stats).map(([nk, d]) => [nk, {
+        kills: d.kills, deaths: d.deaths, acs: d.acs, rating20: d.rating20,
+        k4: d.k4, k5: d.k5, k6: d.k6, k7: d.k7,
+        clutch1v2: d.clutch1v2, clutch1v3: d.clutch1v3, clutch1v4: d.clutch1v4, clutch1v5: d.clutch1v5,
+        isWinner: d.isWinner, cleanSheetWin: d.cleanSheetWin,
+      }])),
+      teams: {} as Record<string, any>,
+    };
+
+    console.log("[calcLog] lowestRatedPlayer:", lowestNk);
+    console.log("[calcLog] ratingRanks:", JSON.stringify(ratingRank));
+
     for (const [teamId, team] of Object.entries(teamMap)) {
       let teamRaw = 0;
+
+      calcLog.teams[teamId] = {
+        chip: team.chip,
+        captainId: team.captainId,
+        captain2Id: team.captain2Id,
+        players: [] as any[],
+        teamTotal: 0,
+        penaltyCount: 0,
+        penaltyPts: 0,
+        netPts: 0,
+      };
+      console.log(`\n[calcLog] ── Team ${teamId} | chip=${team.chip ?? "none"} cap=${team.captainId} cap2=${team.captain2Id} ──`);
 
       // top_fragger: find highest raw scorer first (pass 1)
       let topFraggerBestPts = -Infinity;
@@ -393,6 +480,8 @@ Deno.serve(async (req) => {
 
         if (!d) {
           // Player didn't play this match — 0 pts
+          console.log(`  [calcLog] ${playerName} (${slot}): NOT IN MATCH → 0 pts`);
+          calcLog.teams[teamId].players.push({ playerName, slot, playerId, foundInMatch: false, finalPts: 0 });
           scoreLogs.push({
             team_id: teamId, matchday_id, match_id: matchId,
             player_id: playerId, player_name: playerName, slot,
@@ -418,11 +507,30 @@ Deno.serve(async (req) => {
         let finalPts = baseFinal;
 
         // top_fragger pass 2: double the best scorer
-        if (team.chip === "topfragger" && nk === topFraggerBestName) {
+        const isTopFraggerDoubled = team.chip === "topfragger" && nk === topFraggerBestName;
+        if (isTopFraggerDoubled) {
           finalPts = rawPts * 2;
         }
 
         teamRaw += finalPts;
+
+        // Build and store per-player breakdown
+        const bd = scoreBreakdown(
+          { kills: d.kills, k4: d.k4, k5: d.k5, k6: d.k6, k7: d.k7,
+            clutch_1v2: d.clutch1v2, clutch_1v3: d.clutch1v3, clutch_1v4: d.clutch1v4, clutch_1v5: d.clutch1v5,
+            is_winner: d.isWinner, clean_sheet_win: d.cleanSheetWin },
+          rank, isLowest, isAnyCaptain, team.chip, isTopFraggerDoubled
+        );
+        calcLog.teams[teamId].players.push({ playerName, slot, playerId, isCaptain: isAnyCaptain, ...bd });
+        console.log(
+          `  [calcLog] ${playerName} (${slot}${isAnyCaptain ? " ★CAP" : ""}):`,
+          `kills=${d.kills}(${bd.killPts}pt)`,
+          `4K=${d.k4}(${bd.k4pts}) 5K=${d.k5}(${bd.k5pts}) 6K=${d.k6}(${bd.k6pts}) 7K=${d.k7}(${bd.k7pts})`,
+          `clutch=${bd.clutchTotal}(${bd.clutchPts}pt)`,
+          `ratingRank=${rank}(${bd.ratingPts}pt)${isLowest ? " LOWEST(-3)" : ""}`,
+          `win=${d.isWinner}(${bd.winPts}pt) cs=${d.cleanSheetWin}(${bd.cleanSheetPts}pt)`,
+          `→ raw=${rawPts} ×${bd.captainMult} = final=${finalPts}`
+        );
 
         scoreLogs.push({
           team_id: teamId, matchday_id, match_id: matchId,
@@ -443,6 +551,12 @@ Deno.serve(async (req) => {
       const penCount = penaltyCount[teamId] ?? 0;
       const penPts = penCount * transferPenaltyPts;
       matchdayScores[teamId] = { raw: teamRaw, penalty: penPts };
+
+      calcLog.teams[teamId].teamTotal = teamRaw;
+      calcLog.teams[teamId].penaltyCount = penCount;
+      calcLog.teams[teamId].penaltyPts = penPts;
+      calcLog.teams[teamId].netPts = teamRaw - penPts;
+      console.log(`  [calcLog] Team ${teamId} total: raw=${teamRaw} penalty=${penPts}(×${penCount}) net=${teamRaw - penPts}`);
     }
 
     // Upsert score_logs
@@ -522,6 +636,7 @@ Deno.serve(async (req) => {
       matchId,
       players: Object.keys(stats).length,
       teamsScored: Object.keys(matchdayScores).length,
+      calcLog,
     });
 
   } catch (err) {

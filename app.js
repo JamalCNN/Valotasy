@@ -999,6 +999,7 @@ async function updatePlayerPrices(mdId){
   for(const [n,v] of Object.entries(ptsMap)) ptsMapLower[n.toLowerCase().trim()] = {pts:v, scraped:n};
 
   const unmatched = [];
+  const log = [];
   let updated = 0;
   for(const p of (allPlayers||[])){
     const key = p.name.toLowerCase().trim();
@@ -1007,6 +1008,8 @@ async function updatePlayerPrices(mdId){
     const score = entry.pts;
     const d = priceChangeDelta(score);
     const newPrice = Math.min(30, Math.max(4, +(p.price + d).toFixed(1)));
+    const capped = newPrice === p.price + d ? '' : ' [CAPPED]';
+    log.push(`${p.name}: pts=${score} delta=${d>=0?'+':''}${d} ${p.price}M→${newPrice}M${capped}`);
     await sb.from('players').update({previous_price: p.price, price: newPrice}).eq('id', p.id);
     const localP = PLAYERS.find(pl=>pl.id===p.id);
     if(localP) localP.price = newPrice;
@@ -1019,10 +1022,15 @@ async function updatePlayerPrices(mdId){
     if(!matched) unmatched.push(entry.scraped);
   }
 
+  console.table(log.map(l=>{
+    const [name,...rest]=l.split(':'); return {player:name.trim(), detail:rest.join(':').trim()};
+  }));
+  if(unmatched.length) console.warn('No DB match for scraped names:', unmatched);
+
   renderAdminPlayers();
   if(btn) btn.textContent = '💰 Update Prices';
   const warn = unmatched.length ? ` | No DB match: ${unmatched.join(', ')}` : '';
-  toast(`💰 Updated ${updated} players${warn}`);
+  toast(`💰 Updated ${updated} players${warn} — see console for details`);
 }
 
 async function addFixture(mdId){

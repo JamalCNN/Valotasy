@@ -1017,6 +1017,8 @@ async function updatePlayerPrices(mdId){
     await sb.from('players').update({previous_price: p.price, price: newPrice}).eq('id', p.id);
     const localP = PLAYERS.find(pl=>pl.id===p.id);
     if(localP) localP.price = newPrice;
+    // Keep myRosters in sync so sell price uses current price, not stale load price
+    for(const rp of Object.values(myRosters)){ if(rp?.id===p.id) rp.price=newPrice; }
     updated++;
   }
 

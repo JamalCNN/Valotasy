@@ -418,6 +418,22 @@ CREATE POLICY "public_access" ON users FOR ALL USING (true) WITH CHECK (true);</
   </div>
 </div>
 
+<div class="modal-bg" id="confirmModal">
+  <div class="modal" style="max-width:360px">
+    <div class="modal-head">
+      <div class="modal-title" id="confirmTitle">Confirm</div>
+      <button class="modal-close" onclick="resolveConfirm(false)">✕</button>
+    </div>
+    <div style="padding:20px 24px">
+      <div id="confirmMsg" style="font-size:13px;color:var(--text);line-height:1.6;white-space:pre-line"></div>
+      <div style="display:flex;gap:10px;margin-top:20px;justify-content:flex-end">
+        <button class="btn btn-outline" onclick="resolveConfirm(false)">Cancel</button>
+        <button class="btn btn-red" id="confirmOkBtn" onclick="resolveConfirm(true)">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

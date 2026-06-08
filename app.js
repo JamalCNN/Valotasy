@@ -240,6 +240,21 @@ function toast(msg,dur=2200){
   setTimeout(()=>t.classList.remove('show'),dur);
 }
 
+let _confirmResolve=null;
+function showConfirm(title, msg, okLabel='Confirm'){
+  return new Promise(resolve=>{
+    _confirmResolve=resolve;
+    document.getElementById('confirmTitle').textContent=title;
+    document.getElementById('confirmMsg').textContent=msg;
+    document.getElementById('confirmOkBtn').textContent=okLabel;
+    document.getElementById('confirmModal').classList.add('open');
+  });
+}
+function resolveConfirm(result){
+  document.getElementById('confirmModal').classList.remove('open');
+  if(_confirmResolve){ _confirmResolve(result); _confirmResolve=null; }
+}
+
 // ===== PAGE NAV =====
 function goPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -476,10 +491,14 @@ function renderDeadlineBanner(curMD){
 function renderTransferInfo(curMD, locked){
   const tlEl=document.getElementById('transferLabel'); if(!tlEl) return;
   const isMD1 = MATCHDAYS[0]?.id===currentMDId;
+  const isWildcardActive = myChip==='wildcard';
   const penalty=TOURNAMENT?.transfer_penalty||8;
   const used=myTransferCount||0;
   if(isMD1){
     tlEl.innerHTML='<span style="color:#4ade80">MD1 — Unlimited transfers</span>';
+    document.getElementById('penaltyPts').textContent='-0 pts';
+  } else if(isWildcardActive){
+    tlEl.innerHTML=`Transfers this MD: <span style="color:#4ade80">${used}</span> &nbsp;<span style="color:#4ade80">🃏 Wildcard — no penalty</span>`;
     document.getElementById('penaltyPts').textContent='-0 pts';
   } else {
     const extra=Math.max(0,used-2);
@@ -587,8 +606,12 @@ async function removePlayer(slotId){
   const p=myRosters[slotId]; if(!p) return;
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
   if(isMarketLocked(curMD)){toast('Market is closed — transfers not allowed');return;}
-  // Sell at min(buy_price, current_price) — record loss if price dropped
   const sellVal=Math.min(myBuyPrices[slotId]||0, p.price||0);
+  const isMD1=MATCHDAYS[0]?.id===currentMDId;
+  const isWildcard=myChip==='wildcard';
+  const transferWarning=(!isMD1&&!isWildcard)?'\nRe-adding them later will cost a transfer.':'';
+  const ok=await showConfirm('Remove Player',`Remove ${p.name}?\nSell value: ${sellVal}M${transferWarning}`,'Remove');
+  if(!ok) return;
   myBudgetAdj -= (myBuyPrices[slotId]||0) - sellVal;
   delete myRosters[slotId]; delete myBuyPrices[slotId];
   if(myCaptainId===p.id)  myCaptainId=null;
@@ -733,14 +756,15 @@ async function pickPlayer(pid){
     // Internal rearrangement: move player to new slot, clear their old slot
     // No budget change, no transfer logged, keep original buy_price
     const oldBuyPrice=myBuyPrices[existingSlot];
+    const displacedBuyPrice=myBuyPrices[pickerSlot]; // save BEFORE overwriting below
     await sb.from('rosters').upsert({team_id:myTeamId,slot:pickerSlot,player_id:p.id,buy_price:oldBuyPrice},{onConflict:'team_id,slot'});
     await sb.from('rosters').delete().eq('team_id',myTeamId).eq('slot',existingSlot);
     myRosters[pickerSlot]=p; myBuyPrices[pickerSlot]=oldBuyPrice;
     delete myRosters[existingSlot]; delete myBuyPrices[existingSlot];
     // Handle displaced player in old slot (if any)
     if(oldP && oldP.id!==p.id){
-      const sellValue=Math.min(myBuyPrices[pickerSlot]||oldP.price, oldP.price);
-      myBudgetAdj -= (myBuyPrices[pickerSlot]||0) - sellValue;
+      const sellValue=Math.min(displacedBuyPrice||oldP.price, oldP.price);
+      myBudgetAdj -= (displacedBuyPrice||0) - sellValue;
       if(myCaptainId===oldP.id) myCaptainId=null;
       if(myCaptain2Id===oldP.id) myCaptain2Id=null;
     }
@@ -754,10 +778,11 @@ async function pickPlayer(pid){
   if(calcBudget()-(myBuyPrices[pickerSlot]||0)+sellValue-p.price<0){toast('Not enough budget!');return;}
   const isMD1=MATCHDAYS[0]?.id===currentMDId;
   const isWildcard=myChip==='wildcard';
-  // Log transfer if replacing a different player (not first pick, not MD1, not wildcard)
-  if(oldP&&oldP.id!==p.id&&!isMD1&&!isWildcard&&currentMDId){
+  // Log transfer: any new market pick (to occupied OR empty slot) that isn't MD1 or wildcard
+  // "New market pick" = player not already in another squad slot (existingSlot path handles those)
+  if(!isMD1&&!isWildcard&&currentMDId){
     const penApplied=myTransferCount>=2;
-    await sb.from('transfers').insert({team_id:myTeamId,matchday_id:currentMDId,slot:pickerSlot,old_player_id:oldP.id,new_player_id:p.id,penalty_applied:penApplied});
+    await sb.from('transfers').insert({team_id:myTeamId,matchday_id:currentMDId,slot:pickerSlot,old_player_id:oldP?.id||null,new_player_id:p.id,penalty_applied:penApplied});
     myTransferCount++;
   }
   // Record realized loss if selling below buy price (price dropped)
@@ -790,7 +815,7 @@ function saveMyTeam(){
 
 async function deleteMyTeam(){
   if(!currentUser||!myTeamId){toast('Not logged in');return;}
-  if(!confirm('Remove your team from the leaderboard?')) return;
+  if(!await showConfirm('Remove Team','Remove your team from the leaderboard? This cannot be undone.','Remove')) return;
   await sb.from('teams').delete().eq('id',myTeamId);
   myTeamId=null; myTeamName=currentUser.manager+"'s Team";
   myRosters={}; myCaptainId=null; myCaptain2Id=null; myChip=null; myTransferCount=0;
@@ -1069,7 +1094,7 @@ async function addFixture(mdId){
 }
 
 async function deleteFixture(fxId){
-  if(!confirm('Delete this fixture?')) return;
+  if(!await showConfirm('Delete Fixture','Delete this fixture? This cannot be undone.','Delete')) return;
   await sb.from('fixtures').delete().eq('id',fxId);
   FIXTURES=FIXTURES.filter(f=>f.id!==fxId);
   renderAdminMatchdays();
@@ -1114,7 +1139,7 @@ async function resetPrices(){
 }
 
 async function resetAllPrices(){
-  if(!confirm('Reset ALL player prices to base? (S=24M A=16M B=10M C=6M)')) return;
+  if(!await showConfirm('Reset All Prices','Reset ALL player prices to base?\nS = 24M · A = 16M · B = 10M · C = 6M','Reset')) return;
   const {data:players}=await sb.from('players').select('id,price,base_price').eq('tournament_id',TOURNAMENT.id).not('base_price','is',null);
   if(!players?.length){toast('Run the base_price SQL in Supabase first');return;}
   for(const p of players){
@@ -1405,7 +1430,7 @@ async function saveEdit(){
 }
 
 async function deletePlayer(id){
-  if(!confirm('Remove this player?')) return;
+  if(!await showConfirm('Remove Player','Remove this player from the tournament roster?','Remove')) return;
   await sb.from('players').delete().eq('id',id);
   PLAYERS=PLAYERS.filter(p=>p.id!==id);
   renderAdminPlayers(); toast('Removed ✓');
@@ -1440,7 +1465,7 @@ function renderTeamListAdmin(){
 }
 
 async function deleteTeamAdmin(teamId){
-  if(!confirm('Delete this team?')) return;
+  if(!await showConfirm('Delete Team','Delete this team and all their data? This cannot be undone.','Delete')) return;
   await sb.from('teams').delete().eq('id',teamId);
   renderTeamListAdmin(); renderLB();
   toast('Team deleted ✓');

@@ -859,25 +859,40 @@ async function updatePlayerPrices(mdId){
   const btn = document.getElementById('priceBtn_'+mdId);
   if(btn) btn.textContent = 'Updating...';
 
-  const {data:logs, error} = await sb.from('score_logs')
-    .select('player_id, raw_pts').eq('matchday_id', mdId);
+  // Use match_player_cache: one row per real player per match (not per fantasy team)
+  const {data:cache, error} = await sb.from('match_player_cache')
+    .select('player_name,kills,k4,k5,k6,k7,clutch_1v2,clutch_1v3,clutch_1v4,clutch_1v5,rating_rank,is_lowest_rating,is_winner,clean_sheet_win')
+    .eq('matchday_id', mdId);
 
-  if(error || !logs?.length){
-    toast('No score data for this matchday');
+  if(error || !cache?.length){
+    toast('No match data for this matchday');
     if(btn) btn.textContent = '💰 Update Prices';
     return;
   }
 
-  const scoreMap = {};
-  for(const l of logs){
-    scoreMap[l.player_id] = (scoreMap[l.player_id]||0) + (l.raw_pts||0);
+  // Sum raw pts per player across all matches in the matchday
+  const ptsMap = {};
+  for(const r of cache){
+    const n = r.player_name;
+    if(!ptsMap[n]) ptsMap[n] = 0;
+    let pts = 0;
+    pts += Math.floor(r.kills / 10);
+    pts += r.k4*3; pts += r.k5*4; pts += r.k6*5; pts += r.k7*5;
+    pts += r.clutch_1v2 + r.clutch_1v3 + r.clutch_1v4 + r.clutch_1v5;
+    const rank = r.rating_rank;
+    if(rank===1) pts+=3; else if(rank===2) pts+=2; else if(rank===3) pts+=1;
+    if(r.is_lowest_rating) pts-=3;
+    if(r.is_winner){ pts+=2; if(r.clean_sheet_win) pts+=1; }
+    ptsMap[n] += pts;
   }
 
-  const playerIds = Object.keys(scoreMap).map(Number);
-  const {data:players} = await sb.from('players').select('id,name,price').in('id',playerIds);
+  // Only update players who actually played (appear in match_player_cache)
+  const names = Object.keys(ptsMap);
+  const {data:players} = await sb.from('players').select('id,name,price')
+    .eq('tournament_id', TOURNAMENT.id).in('name', names);
 
   for(const p of (players||[])){
-    const score = scoreMap[p.id] ?? 0;
+    const score = ptsMap[p.name] ?? 0;
     const d = priceChangeDelta(score);
     const newPrice = Math.min(30, Math.max(4, +(p.price + d).toFixed(1)));
     await sb.from('players').update({previous_price: p.price, price: newPrice}).eq('id', p.id);
@@ -887,7 +902,6 @@ async function updatePlayerPrices(mdId){
 
   renderAdminPlayers();
   if(btn) btn.textContent = '💰 Update Prices';
-  const md = MATCHDAYS.find(m=>m.id===mdId);
   toast(`💰 Prices updated for ${players?.length||0} players ✓`);
 }
 

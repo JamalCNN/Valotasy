@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS players (
   vct_team      TEXT NOT NULL,
   role          TEXT NOT NULL  CHECK (role IN ('Duelist','Initiator','Controller','Sentinel')),
   tier          TEXT NOT NULL  CHECK (tier IN ('S','A','B','C')),
-  price         REAL NOT NULL,
+  price          REAL NOT NULL,
+  previous_price REAL,
   UNIQUE (tournament_id, name)
 );
 

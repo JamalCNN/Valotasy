@@ -993,12 +993,20 @@ async function updatePrices(mdId){
     const pts=playerPts[p.name];
     if(pts===undefined) continue;
     const d=delta(pts);
-    if(d===0) continue;
     const newPrice=Math.max(0,+(p.price+d).toFixed(1));
-    await sb.from('players').update({price:newPrice}).eq('id',p.id);
+    await sb.from('players').update({previous_price:p.price,price:newPrice}).eq('id',p.id);
     updated++;
   }
   toast(`💰 Prices updated for ${updated} players ✓`);
+}
+
+async function resetPrices(){
+  const {data:players}=await sb.from('players').select('id,price,previous_price').eq('tournament_id',TOURNAMENT.id).not('previous_price','is',null);
+  if(!players?.length){toast('No previous prices saved');return;}
+  for(const p of players){
+    await sb.from('players').update({price:p.previous_price,previous_price:null}).eq('id',p.id);
+  }
+  toast(`↩️ Prices reset for ${players.length} players ✓`);
 }
 
 // ===== PREDICTIONS =====

@@ -208,6 +208,17 @@ function subscribeRealtime(){
       const active=document.querySelector('.page.active');
       if(active?.id==='page-predict') renderPredictPage();
     })
+    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'players'},(payload)=>{
+      const updated=payload.new; if(!updated) return;
+      // Keep PLAYERS array in sync
+      const lp=PLAYERS.find(p=>p.id===updated.id);
+      if(lp) lp.price=updated.price;
+      // Keep myRosters in sync so sell price uses current price
+      for(const rp of Object.values(myRosters)){ if(rp?.id===updated.id) rp.price=updated.price; }
+      const active=document.querySelector('.page.active');
+      if(active?.id==='page-team') renderSlots();
+      if(active?.id==='page-players') renderPlayers?.();
+    })
     .on('postgres_changes',{event:'*',schema:'public',table:'fixtures'},(payload)=>{
       const ev=payload.eventType;
       if(ev==='INSERT'&&payload.new) FIXTURES.push(payload.new);

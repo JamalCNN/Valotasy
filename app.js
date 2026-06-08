@@ -103,6 +103,7 @@ let myTeamId       = null;
 let myTeamName     = '';
 let myRosters      = {}; // {slot: playerRow}
 let myBuyPrices    = {}; // {slot: price_paid} — never changes with market
+let myBudgetAdj    = 0;  // cumulative realized losses from selling below buy price
 let myCaptainId    = null;
 let myCaptain2Id   = null;
 let myChip         = null;
@@ -156,14 +157,14 @@ async function seedPlayers(){
 async function loadMyTeam(){
   if(!currentUser||!TOURNAMENT) return;
   const {data:team} = await sb.from('teams')
-    .select('id,team_name,captain_id,captain2_id,total_points,rosters(slot,player_id,buy_price,players(*)),active_chips(chip_name,matchday_id)')
+    .select('id,team_name,captain_id,captain2_id,total_points,budget_adjustment,rosters(slot,player_id,buy_price,players(*)),active_chips(chip_name,matchday_id)')
     .eq('user_id',currentUser.userId).eq('tournament_id',TOURNAMENT.id).single();
   if(!team){
     const {data:newTeam} = await sb.from('teams')
       .insert({user_id:currentUser.userId,tournament_id:TOURNAMENT.id,team_name:currentUser.manager+"'s Team"})
       .select('id,team_name').single();
     if(newTeam){ myTeamId=newTeam.id; myTeamName=newTeam.team_name; }
-    myCaptainId=null; myCaptain2Id=null; myChip=null; myRosters={}; myBuyPrices={}; myTransferCount=0;
+    myCaptainId=null; myCaptain2Id=null; myChip=null; myRosters={}; myBuyPrices={}; myBudgetAdj=0; myTransferCount=0;
     return;
   }
   myTeamId     = team.id;
@@ -172,6 +173,7 @@ async function loadMyTeam(){
   myCaptain2Id = team.captain2_id;
   const chipRow = (team.active_chips||[]).find(c=>c.matchday_id===currentMDId);
   myChip = chipRow?.chip_name||null;
+  myBudgetAdj = team.budget_adjustment ?? 0;
   myRosters = {}; myBuyPrices = {};
   for(const r of (team.rosters||[])){
     if(r.players){ myRosters[r.slot]=r.players; myBuyPrices[r.slot]=r.buy_price??r.players.price; }
@@ -499,11 +501,14 @@ async function removePlayer(slotId){
   const p=myRosters[slotId]; if(!p) return;
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
   if(isMarketLocked(curMD)){toast('Market is closed — transfers not allowed');return;}
+  // Sell at min(buy_price, current_price) — record loss if price dropped
+  const sellVal=Math.min(myBuyPrices[slotId]||0, p.price||0);
+  myBudgetAdj -= (myBuyPrices[slotId]||0) - sellVal;
   delete myRosters[slotId]; delete myBuyPrices[slotId];
   if(myCaptainId===p.id)  myCaptainId=null;
   if(myCaptain2Id===p.id) myCaptain2Id=null;
   await sb.from('rosters').delete().eq('team_id',myTeamId).eq('slot',slotId);
-  await sb.from('teams').update({captain_id:myCaptainId,captain2_id:myCaptain2Id}).eq('id',myTeamId);
+  await sb.from('teams').update({captain_id:myCaptainId,captain2_id:myCaptain2Id,budget_adjustment:myBudgetAdj}).eq('id',myTeamId);
   renderTeamPage();
   toast('Player removed');
 }
@@ -563,7 +568,7 @@ async function selectChip(id){
 function calcBudget(){
   const budget=TOURNAMENT?.budget||100;
   const used=Object.values(myBuyPrices).reduce((s,v)=>s+(v||0),0);
-  const left=budget-used;
+  const left=budget-used+myBudgetAdj;
   const el=document.getElementById('budgetLeft');
   const tot=document.getElementById('budgetTotal');
   el.textContent=left+'M'; el.style.color=left<0?'var(--red)':'var(--accent)';
@@ -634,9 +639,10 @@ async function pickPlayer(pid){
   if(!pickerSlot) return;
   const p=PLAYERS.find(pl=>pl.id===pid); if(!p) return;
   const oldP=myRosters[pickerSlot];
-  // Sell at what was paid for old player (bank account model), buy new at current price
-  const net=(myBuyPrices[pickerSlot]||0)-(p.price||0);
-  if(calcBudget()+net<0){toast('Not enough budget!');return;}
+  // Sell price = min(buy_price, current_price): no profit from rises, losses apply for drops
+  const sellValue=oldP ? Math.min(myBuyPrices[pickerSlot]||0, oldP.price||0) : 0;
+  const net=sellValue-(p.price||0);
+  if(calcBudget()-(myBuyPrices[pickerSlot]||0)+sellValue-p.price<0){toast('Not enough budget!');return;}
   const isMD1=MATCHDAYS[0]?.id===currentMDId;
   const isWildcard=myChip==='wildcard';
   // Log transfer if swapping (not first pick, not MD1, not wildcard)
@@ -645,14 +651,15 @@ async function pickPlayer(pid){
     await sb.from('transfers').insert({team_id:myTeamId,matchday_id:currentMDId,slot:pickerSlot,old_player_id:oldP.id,new_player_id:p.id,penalty_applied:penApplied});
     myTransferCount++;
   }
+  // Record realized loss if selling below buy price (price dropped)
+  if(oldP){ myBudgetAdj -= (myBuyPrices[pickerSlot]||0) - sellValue; }
   // Upsert roster
   await sb.from('rosters').upsert({team_id:myTeamId,slot:pickerSlot,player_id:p.id,buy_price:p.price},{onConflict:'team_id,slot'});
   myRosters[pickerSlot]=p; myBuyPrices[pickerSlot]=p.price;
   if(myCaptainId===oldP?.id)  myCaptainId=null;
   if(myCaptain2Id===oldP?.id) myCaptain2Id=null;
-  if(myCaptainId||myCaptain2Id){
-    await sb.from('teams').update({captain_id:myCaptainId,captain2_id:myCaptain2Id}).eq('id',myTeamId);
-  }
+  const teamUpdate={captain_id:myCaptainId,captain2_id:myCaptain2Id,budget_adjustment:myBudgetAdj};
+  await sb.from('teams').update(teamUpdate).eq('id',myTeamId);
   closePicker();
   renderTeamPage();
   toast(`${p.name} added ✓`);

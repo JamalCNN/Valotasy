@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS teams (
   chip_triplecap_used     BOOLEAN DEFAULT FALSE,
   chip_clonecap_used      BOOLEAN DEFAULT FALSE,
   total_points            REAL DEFAULT 0,
+  budget_adjustment       REAL DEFAULT 0,   -- cumulative realized losses from price-drop sells
   created_at              TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (user_id, tournament_id)
 );

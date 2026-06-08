@@ -991,23 +991,38 @@ async function updatePlayerPrices(mdId){
     ptsMap[n] += pts;
   }
 
-  // Only update players who actually played (appear in match_player_cache)
-  const names = Object.keys(ptsMap);
-  const {data:players} = await sb.from('players').select('id,name,price')
-    .eq('tournament_id', TOURNAMENT.id).in('name', names);
+  // Fetch all players and match case-insensitively against scraped names
+  const {data:allPlayers} = await sb.from('players').select('id,name,price').eq('tournament_id', TOURNAMENT.id);
 
-  for(const p of (players||[])){
-    const score = ptsMap[p.name] ?? 0;
+  // Build a lowercase lookup from scraped names → pts
+  const ptsMapLower = {};
+  for(const [n,v] of Object.entries(ptsMap)) ptsMapLower[n.toLowerCase().trim()] = {pts:v, scraped:n};
+
+  const unmatched = [];
+  let updated = 0;
+  for(const p of (allPlayers||[])){
+    const key = p.name.toLowerCase().trim();
+    const entry = ptsMapLower[key];
+    if(!entry){ continue; } // didn't play this matchday
+    const score = entry.pts;
     const d = priceChangeDelta(score);
     const newPrice = Math.min(30, Math.max(4, +(p.price + d).toFixed(1)));
     await sb.from('players').update({previous_price: p.price, price: newPrice}).eq('id', p.id);
     const localP = PLAYERS.find(pl=>pl.id===p.id);
     if(localP) localP.price = newPrice;
+    updated++;
+  }
+
+  // Warn about scraped names that had no DB match
+  for(const [lc, entry] of Object.entries(ptsMapLower)){
+    const matched = (allPlayers||[]).some(p=>p.name.toLowerCase().trim()===lc);
+    if(!matched) unmatched.push(entry.scraped);
   }
 
   renderAdminPlayers();
   if(btn) btn.textContent = '💰 Update Prices';
-  toast(`💰 Prices updated for ${players?.length||0} players ✓`);
+  const warn = unmatched.length ? ` | No DB match: ${unmatched.join(', ')}` : '';
+  toast(`💰 Updated ${updated} players${warn}`);
 }
 
 async function addFixture(mdId){

@@ -487,11 +487,16 @@ function renderSlots(){
     const pts=p?mySlotScores[p.id]||0:0;
     const dispPts=isCap?pts*2:pts;
     return p
-      ?`<div id="slot_${sl.id}" class="slot filled ${isCap?'cap-slot':''}" draggable="true"
-          ondragstart="slotDragStart(event,'${sl.id}')" ondragend="slotDragEnd(event,'${sl.id}')"
+      ?`<div id="slot_${sl.id}" class="slot filled ${isCap?'cap-slot':''}"
           ondragover="slotDragOver(event,'${sl.id}')" ondragleave="slotDragLeave('${sl.id}')" ondrop="slotDrop(event,'${sl.id}')">
           <div class="slot-label" style="display:flex;justify-content:space-between;align-items:center">
-            <span>${sl.label}</span>
+            <span style="display:flex;align-items:center;gap:5px">
+              <span class="drag-handle" draggable="true"
+                ondragstart="slotDragStart(event,'${sl.id}')"
+                ondragend="slotDragEnd(event,'${sl.id}')"
+                title="Drag to rearrange">⠿</span>
+              ${sl.label}
+            </span>
             <button onclick="event.stopPropagation();removePlayer('${sl.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;transition:.2s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
           </div>
           ${isCap?'<div class="cap-badge">C</div>':''}
@@ -511,12 +516,12 @@ function renderSlots(){
 function slotDragStart(e,slotId){
   dragSlot=slotId;
   e.dataTransfer.effectAllowed='move';
+  e.dataTransfer.setData('text/plain',slotId);
   setTimeout(()=>{ const el=document.getElementById('slot_'+slotId); if(el) el.style.opacity='0.4'; },0);
 }
 function slotDragEnd(e,slotId){
   dragSlot=null;
-  const el=document.getElementById('slot_'+slotId); if(el) el.style.opacity='1';
-  document.querySelectorAll('.slot.drag-over').forEach(el=>el.classList.remove('drag-over'));
+  document.querySelectorAll('.slot').forEach(el=>{ el.style.opacity='1'; el.classList.remove('drag-over'); });
 }
 function slotDragOver(e,slotId){
   e.preventDefault(); e.dataTransfer.dropEffect='move';

@@ -98,17 +98,26 @@ let currentMDId = null;
 let lbMDId      = null;
 let _countdownTimer = null;
 
-// My team state
+// My team state (draft — not persisted until confirmTeam())
 let myTeamId       = null;
 let myTeamName     = '';
-let myRosters      = {}; // {slot: playerRow}
-let myBuyPrices    = {}; // {slot: price_paid} — never changes with market
-let myBudgetAdj    = 0;  // cumulative realized losses from selling below buy price
+let myRosters      = {}; // {slot: playerRow}   ← draft
+let myBuyPrices    = {}; // {slot: price_paid}   ← draft
+let myBudgetAdj    = 0;  // kept for compat — actual budget uses calcDraftBudgetAdj()
 let myCaptainId    = null;
 let myCaptain2Id   = null;
 let myChip         = null;
 let myTransferCount = 0;
 let mySlotScores   = {}; // {playerId: finalPts} for current MD
+
+// Saved state — snapshot of last DB-committed squad (for diff & discard)
+let savedRosters      = {};
+let savedBuyPrices    = {};
+let savedBudgetAdj    = 0;
+let savedCaptainId    = null;
+let savedCaptain2Id   = null;
+let savedTransferCount = 0;
+let isDirty           = false;
 
 // UI state
 let pickerSlot = null, pickerFilter = 'ALL', playersFilter = 'ALL';
@@ -183,6 +192,14 @@ async function loadMyTeam(){
       .select('*',{count:'exact',head:true}).eq('team_id',myTeamId).eq('matchday_id',currentMDId);
     myTransferCount = count||0;
   }
+  // Snapshot DB state — used for diff (change log) and discard
+  savedRosters      = Object.fromEntries(Object.entries(myRosters).map(([k,v])=>[k,v]));
+  savedBuyPrices    = {...myBuyPrices};
+  savedBudgetAdj    = myBudgetAdj;
+  savedCaptainId    = myCaptainId;
+  savedCaptain2Id   = myCaptain2Id;
+  savedTransferCount = myTransferCount;
+  isDirty           = false;
   await loadMySlotScores();
 }
 
@@ -213,8 +230,9 @@ function subscribeRealtime(){
       // Keep PLAYERS array in sync
       const lp=PLAYERS.find(p=>p.id===updated.id);
       if(lp) lp.price=updated.price;
-      // Keep myRosters in sync so sell price uses current price
+      // Keep draft + saved rosters in sync so sell price uses current price
       for(const rp of Object.values(myRosters)){ if(rp?.id===updated.id) rp.price=updated.price; }
+      for(const rp of Object.values(savedRosters)){ if(rp?.id===updated.id) rp.price=updated.price; }
       const active=document.querySelector('.page.active');
       if(active?.id==='page-team') renderSlots();
       if(active?.id==='page-players') renderPlayers?.();
@@ -253,6 +271,38 @@ function showConfirm(title, msg, okLabel='Confirm'){
 function resolveConfirm(result){
   document.getElementById('confirmModal').classList.remove('open');
   if(_confirmResolve){ _confirmResolve(result); _confirmResolve=null; }
+}
+
+// ===== DRAFT STATE HELPERS =====
+
+// Budget adjustment from original players truly removed from squad (not just rearranged)
+function calcDraftBudgetAdj(){
+  const currentIds=new Set(Object.values(myRosters).map(p=>p?.id).filter(Boolean));
+  let adj=savedBudgetAdj;
+  for(const sl of SLOTS){
+    const orig=savedRosters[sl.id];
+    if(!orig||currentIds.has(orig.id)) continue; // still in squad somewhere
+    const bp=savedBuyPrices[sl.id]||orig.price;
+    adj-=(bp-Math.min(bp,orig.price)); // deduct realized loss (0 if price rose)
+  }
+  return adj;
+}
+
+// Total transfers for this MD including unsaved draft picks
+function calcDraftTransfers(){
+  const savedIds=new Set(Object.values(savedRosters).map(p=>p?.id).filter(Boolean));
+  let count=savedTransferCount;
+  for(const p of Object.values(myRosters)){
+    if(p&&!savedIds.has(p.id)) count++;
+  }
+  return count;
+}
+
+// Numeric budget remaining (does not update DOM)
+function getDraftBudget(){
+  const budget=TOURNAMENT?.budget||100;
+  const used=Object.values(myBuyPrices).reduce((s,v)=>s+(v||0),0);
+  return budget-used+calcDraftBudgetAdj();
 }
 
 // ===== PAGE NAV =====
@@ -476,6 +526,14 @@ async function renderTeamPage(){
   renderChipList();
   calcBudget();
   calcMyPts();
+  renderChangesPanel();
+  // Save bar state
+  const discardBtn=document.getElementById('discardBtn');
+  const confirmBtn=document.getElementById('confirmBtn');
+  const saveInfo=document.getElementById('saveInfo');
+  if(discardBtn) discardBtn.style.display=isDirty?'':'none';
+  if(confirmBtn){ confirmBtn.textContent=isDirty?'✓ Confirm & Save':'✓ Save Team'; confirmBtn.classList.toggle('btn-accent',isDirty); }
+  if(saveInfo) saveInfo.textContent=isDirty?'Unsaved changes':'All changes saved';
 }
 
 function renderDeadlineBanner(curMD){
@@ -493,7 +551,7 @@ function renderTransferInfo(curMD, locked){
   const isMD1 = MATCHDAYS[0]?.id===currentMDId;
   const isWildcardActive = myChip==='wildcard';
   const penalty=TOURNAMENT?.transfer_penalty||8;
-  const used=myTransferCount||0;
+  const used=calcDraftTransfers();
   if(isMD1){
     tlEl.innerHTML='<span style="color:#4ade80">MD1 — Unlimited transfers</span>';
     document.getElementById('penaltyPts').textContent='-0 pts';
@@ -516,8 +574,10 @@ function renderSlots(){
     const isCap=p&&(myCaptainId===p.id||myCaptain2Id===p.id);
     const pts=p?mySlotScores[p.id]||0:0;
     const dispPts=isCap?pts*2:pts;
+    const changed=savedRosters[sl.id]?.id!==p?.id;
+    const pendingClass=changed?'slot-pending':'';
     return p
-      ?`<div id="slot_${sl.id}" class="slot filled ${isCap?'cap-slot':''}"
+      ?`<div id="slot_${sl.id}" class="slot filled ${isCap?'cap-slot':''} ${pendingClass}"
           ondragover="slotDragOver(event,'${sl.id}')" ondragleave="slotDragLeave('${sl.id}')" ondrop="slotDrop(event,'${sl.id}')">
           <div class="slot-label" style="display:flex;justify-content:space-between;align-items:center">
             <span style="display:flex;align-items:center;gap:5px">
@@ -584,20 +644,13 @@ async function slotDrop(e,targetId){
   const toBuy=myBuyPrices[targetId];
 
   if(toPlayer){
-    // Swap both players between slots — no transfer, keep buy prices with the player
-    await Promise.all([
-      sb.from('rosters').upsert({team_id:myTeamId,slot:fromId,player_id:toPlayer.id,buy_price:toBuy},{onConflict:'team_id,slot'}),
-      sb.from('rosters').upsert({team_id:myTeamId,slot:targetId,player_id:fromPlayer.id,buy_price:fromBuy},{onConflict:'team_id,slot'}),
-    ]);
     myRosters[fromId]=toPlayer; myBuyPrices[fromId]=toBuy;
     myRosters[targetId]=fromPlayer; myBuyPrices[targetId]=fromBuy;
   } else {
-    // Move to empty slot — no transfer
-    await sb.from('rosters').upsert({team_id:myTeamId,slot:targetId,player_id:fromPlayer.id,buy_price:fromBuy},{onConflict:'team_id,slot'});
-    await sb.from('rosters').delete().eq('team_id',myTeamId).eq('slot',fromId);
     myRosters[targetId]=fromPlayer; myBuyPrices[targetId]=fromBuy;
     delete myRosters[fromId]; delete myBuyPrices[fromId];
   }
+  isDirty=true;
   renderTeamPage();
   toast('Squad updated ✓');
 }
@@ -606,18 +659,18 @@ async function removePlayer(slotId){
   const p=myRosters[slotId]; if(!p) return;
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
   if(isMarketLocked(curMD)){toast('Market is closed — transfers not allowed');return;}
-  const sellVal=Math.min(myBuyPrices[slotId]||0, p.price||0);
+  const isOrigPlayer=savedRosters[slotId]?.id===p.id;
+  const buyPriceForSell=isOrigPlayer?(savedBuyPrices[slotId]||p.price):(myBuyPrices[slotId]||p.price);
+  const sellVal=Math.min(buyPriceForSell, p.price||0);
   const isMD1=MATCHDAYS[0]?.id===currentMDId;
   const isWildcard=myChip==='wildcard';
   const transferWarning=(!isMD1&&!isWildcard)?'\nRe-adding them later will cost a transfer.':'';
   const ok=await showConfirm('Remove Player',`Remove ${p.name}?\nSell value: ${sellVal}M${transferWarning}`,'Remove');
   if(!ok) return;
-  myBudgetAdj -= (myBuyPrices[slotId]||0) - sellVal;
   delete myRosters[slotId]; delete myBuyPrices[slotId];
-  if(myCaptainId===p.id)  myCaptainId=null;
+  if(myCaptainId===p.id) myCaptainId=null;
   if(myCaptain2Id===p.id) myCaptain2Id=null;
-  await sb.from('rosters').delete().eq('team_id',myTeamId).eq('slot',slotId);
-  await sb.from('teams').update({captain_id:myCaptainId,captain2_id:myCaptain2Id,budget_adjustment:myBudgetAdj}).eq('id',myTeamId);
+  isDirty=true;
   renderTeamPage();
   toast('Player removed');
 }
@@ -675,9 +728,8 @@ async function selectChip(id){
 }
 
 function calcBudget(){
+  const left=getDraftBudget();
   const budget=TOURNAMENT?.budget||100;
-  const used=Object.values(myBuyPrices).reduce((s,v)=>s+(v||0),0);
-  const left=budget-used+myBudgetAdj;
   const el=document.getElementById('budgetLeft');
   const tot=document.getElementById('budgetTotal');
   el.textContent=left+'M'; el.style.color=left<0?'var(--red)':'var(--accent)';
@@ -695,7 +747,7 @@ function calcMyPts(){
   const isMD1 = MATCHDAYS[0]?.id === currentMDId;
   const isWildcard = myChip === 'wildcard';
   if(!isMD1 && !isWildcard){
-    const extra = Math.max(0, myTransferCount - 2);
+    const extra = Math.max(0, calcDraftTransfers() - 2);
     total -= extra * (TOURNAMENT?.transfer_penalty || 8);
   }
   document.getElementById('myTotalPts').textContent = total;
@@ -749,78 +801,145 @@ async function pickPlayer(pid){
   const p=PLAYERS.find(pl=>pl.id===pid); if(!p) return;
   const oldP=myRosters[pickerSlot];
 
-  // Check if player is already in the squad (different slot) — internal move, not a transfer
+  // Internal move: player already in squad at another slot — no transfer, no budget change
   const existingSlot=Object.keys(myRosters).find(s=>s!==pickerSlot&&myRosters[s]?.id===p.id);
-
   if(existingSlot){
-    // Internal rearrangement: move player to new slot, clear their old slot
-    // No budget change, no transfer logged, keep original buy_price
-    const oldBuyPrice=myBuyPrices[existingSlot];
-    const displacedBuyPrice=myBuyPrices[pickerSlot]; // save BEFORE overwriting below
-    await sb.from('rosters').upsert({team_id:myTeamId,slot:pickerSlot,player_id:p.id,buy_price:oldBuyPrice},{onConflict:'team_id,slot'});
-    await sb.from('rosters').delete().eq('team_id',myTeamId).eq('slot',existingSlot);
-    myRosters[pickerSlot]=p; myBuyPrices[pickerSlot]=oldBuyPrice;
+    const movedBuyPrice=myBuyPrices[existingSlot];
+    myRosters[pickerSlot]=p; myBuyPrices[pickerSlot]=movedBuyPrice;
     delete myRosters[existingSlot]; delete myBuyPrices[existingSlot];
-    // Handle displaced player in old slot (if any)
-    if(oldP && oldP.id!==p.id){
-      const sellValue=Math.min(displacedBuyPrice||oldP.price, oldP.price);
-      myBudgetAdj -= (displacedBuyPrice||0) - sellValue;
+    if(oldP&&oldP.id!==p.id){
       if(myCaptainId===oldP.id) myCaptainId=null;
       if(myCaptain2Id===oldP.id) myCaptain2Id=null;
     }
-    await sb.from('teams').update({captain_id:myCaptainId,captain2_id:myCaptain2Id,budget_adjustment:myBudgetAdj}).eq('id',myTeamId);
+    isDirty=true;
     closePicker(); renderTeamPage(); toast(`${p.name} moved ✓`);
     return;
   }
 
-  // Normal pick: buying from the market
-  const sellValue=oldP ? Math.min(myBuyPrices[pickerSlot]||0, oldP.price||0) : 0;
-  if(calcBudget()-(myBuyPrices[pickerSlot]||0)+sellValue-p.price<0){toast('Not enough budget!');return;}
-  const isMD1=MATCHDAYS[0]?.id===currentMDId;
-  const isWildcard=myChip==='wildcard';
-  // Log transfer: any new market pick (to occupied OR empty slot) that isn't MD1 or wildcard
-  // "New market pick" = player not already in another squad slot (existingSlot path handles those)
-  if(!isMD1&&!isWildcard&&currentMDId){
-    const penApplied=myTransferCount>=2;
-    await sb.from('transfers').insert({team_id:myTeamId,matchday_id:currentMDId,slot:pickerSlot,old_player_id:oldP?.id||null,new_player_id:p.id,penalty_applied:penApplied});
-    myTransferCount++;
-  }
-  // Record realized loss if selling below buy price (price dropped)
-  if(oldP){ myBudgetAdj -= (myBuyPrices[pickerSlot]||0) - sellValue; }
-  await sb.from('rosters').upsert({team_id:myTeamId,slot:pickerSlot,player_id:p.id,buy_price:p.price},{onConflict:'team_id,slot'});
+  // Normal market pick — budget check by simulating the pick
+  const prevP=myRosters[pickerSlot];
+  const prevBuy=myBuyPrices[pickerSlot];
   myRosters[pickerSlot]=p; myBuyPrices[pickerSlot]=p.price;
-  if(myCaptainId===oldP?.id)  myCaptainId=null;
+  if(getDraftBudget()<0){
+    myRosters[pickerSlot]=prevP; myBuyPrices[pickerSlot]=prevBuy;
+    toast('Not enough budget!'); return;
+  }
+  if(myCaptainId===oldP?.id) myCaptainId=null;
   if(myCaptain2Id===oldP?.id) myCaptain2Id=null;
-  await sb.from('teams').update({captain_id:myCaptainId,captain2_id:myCaptain2Id,budget_adjustment:myBudgetAdj}).eq('id',myTeamId);
+  isDirty=true;
   closePicker(); renderTeamPage(); toast(`${p.name} added ✓`);
 }
 
-// ===== SAVE / SUBMIT =====
-async function saveAndSubmit(){
+// ===== DRAFT CONFIRM / DISCARD =====
+async function confirmTeam(){
   if(!myTeamId){toast('Not logged in');return;}
-  const nameEl=document.getElementById('myTeamName');
-  const newName=nameEl?.value.trim()||myTeamName;
+  if(getDraftBudget()<0){toast('Over budget — adjust your squad');return;}
+
+  // Save team name
+  const newName=(document.getElementById('myTeamName')?.value.trim())||myTeamName;
   if(!newName){toast('Please enter a team name');return;}
-  if(calcBudget()<0){toast('Over budget — adjust your squad');return;}
-  await sb.from('teams').update({team_name:newName}).eq('id',myTeamId);
-  myTeamName=newName;
-  document.getElementById('saveInfo').textContent='Saved at '+new Date().toLocaleTimeString('en-US');
+
+  const isMD1=MATCHDAYS[0]?.id===currentMDId;
+  const isWildcard=myChip==='wildcard';
+  const savedIds=new Set(Object.values(savedRosters).map(p=>p?.id).filter(Boolean));
+
+  // Build transfer log for new market players
+  const transfers=[]; let txCount=savedTransferCount;
+  if(!isMD1&&!isWildcard&&currentMDId){
+    for(const sl of SLOTS.map(s=>s.id)){
+      const curr=myRosters[sl];
+      if(!curr||savedIds.has(curr.id)) continue;
+      transfers.push({team_id:myTeamId,matchday_id:currentMDId,slot:sl,
+        old_player_id:savedRosters[sl]?.id||null,new_player_id:curr.id,
+        penalty_applied:txCount>=2});
+      txCount++;
+    }
+  }
+
+  const finalAdj=calcDraftBudgetAdj();
+
+  // Batch DB writes
+  const ops=[];
+  const rosterUpserts=Object.entries(myRosters).map(([slot,p])=>({team_id:myTeamId,slot,player_id:p.id,buy_price:myBuyPrices[slot]}));
+  if(rosterUpserts.length) ops.push(sb.from('rosters').upsert(rosterUpserts,{onConflict:'team_id,slot'}));
+  // Delete cleared slots
+  const clearedSlots=SLOTS.map(s=>s.id).filter(sl=>savedRosters[sl]&&!myRosters[sl]);
+  for(const sl of clearedSlots) ops.push(sb.from('rosters').delete().eq('team_id',myTeamId).eq('slot',sl));
+  if(transfers.length) ops.push(sb.from('transfers').insert(transfers));
+  ops.push(sb.from('teams').update({team_name:newName,captain_id:myCaptainId,captain2_id:myCaptain2Id,budget_adjustment:finalAdj}).eq('id',myTeamId));
+
+  await Promise.all(ops);
+
+  // Sync state
+  myTeamName=newName; myBudgetAdj=finalAdj; myTransferCount=txCount;
+  savedRosters=Object.fromEntries(Object.entries(myRosters).map(([k,v])=>[k,v]));
+  savedBuyPrices={...myBuyPrices}; savedBudgetAdj=finalAdj;
+  savedCaptainId=myCaptainId; savedCaptain2Id=myCaptain2Id; savedTransferCount=txCount;
+  isDirty=false;
+
   if(currentUser) document.getElementById('navUserName').textContent=newName||currentUser.manager;
-  toast('Team saved ✓');
+  renderTeamPage(); renderLB();
+  toast('Team confirmed ✓');
 }
 
-function saveMyTeam(){
-  // Name input live change — no DB write needed, saved on "Save Team" click
+function discardDraft(){
+  myRosters=Object.fromEntries(Object.entries(savedRosters).map(([k,v])=>[k,v]));
+  myBuyPrices={...savedBuyPrices}; myBudgetAdj=savedBudgetAdj;
+  myCaptainId=savedCaptainId; myCaptain2Id=savedCaptain2Id; myTransferCount=savedTransferCount;
+  isDirty=false;
+  renderTeamPage();
+  toast('Changes discarded');
 }
+
+function renderChangesPanel(){
+  const el=document.getElementById('changesPanel'); if(!el) return;
+  if(!isDirty){el.style.display='none'; el.innerHTML=''; return;}
+
+  const savedIds=new Set(Object.values(savedRosters).map(p=>p?.id).filter(Boolean));
+  const isMD1=MATCHDAYS[0]?.id===currentMDId;
+  const isWildcard=myChip==='wildcard';
+  const rows=[];
+
+  for(const sl of SLOTS){
+    const orig=savedRosters[sl.id];
+    const curr=myRosters[sl.id];
+    if(orig?.id===curr?.id) continue; // no change for this slot
+    const isTransfer=curr&&!savedIds.has(curr.id);
+    const outLabel=orig?`<span style="color:var(--red)">${orig.name}</span>`:'<span style="color:var(--muted)">empty</span>';
+    const inLabel=curr?`<span style="color:#4ade80">${curr.name}</span>`:'<span style="color:var(--muted)">removed</span>';
+    const badge=isTransfer&&!isMD1&&!isWildcard?'<span style="font-size:9px;background:rgba(255,70,85,0.15);color:var(--red);padding:1px 5px;border-radius:3px;margin-left:4px">TRANSFER</span>':'';
+    rows.push(`<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:9px;color:var(--muted);width:32px;flex-shrink:0">${sl.label}</span>
+      ${outLabel} <span style="color:var(--muted)">→</span> ${inLabel}${badge}
+    </div>`);
+  }
+
+  const draftTx=calcDraftTransfers();
+  const penalty=TOURNAMENT?.transfer_penalty||8;
+  const extra=(!isMD1&&!isWildcard)?Math.max(0,draftTx-2):0;
+  const txStr=isMD1?'MD1 — free':`${draftTx}/2${extra>0?` <span style="color:var(--red)">+${extra} penalty (-${extra*penalty}pts)</span>`:''}`;
+
+  el.style.display='block';
+  el.innerHTML=`<div style="background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.15);border-radius:6px;padding:12px 16px;margin-bottom:10px">
+    <div style="font-size:10px;font-weight:600;letter-spacing:1.5px;color:var(--accent);margin-bottom:8px">PENDING CHANGES</div>
+    ${rows.length?rows.join(''):'<div style="font-size:12px;color:var(--muted)">Only slot rearrangements — no transfers</div>'}
+    <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--muted)">
+      <span>Budget: <strong style="color:${getDraftBudget()<0?'var(--red)':'var(--accent)'}">${getDraftBudget()}M</strong></span>
+      <span>Transfers: <strong>${txStr}</strong></span>
+    </div>
+  </div>`;
+}
+
+function saveMyTeam(){} // kept for input oninput hook
 
 async function deleteMyTeam(){
   if(!currentUser||!myTeamId){toast('Not logged in');return;}
   if(!await showConfirm('Remove Team','Remove your team from the leaderboard? This cannot be undone.','Remove')) return;
   await sb.from('teams').delete().eq('id',myTeamId);
   myTeamId=null; myTeamName=currentUser.manager+"'s Team";
-  myRosters={}; myCaptainId=null; myCaptain2Id=null; myChip=null; myTransferCount=0;
-  // Re-create empty team
-  const {data:newTeam} = await sb.from('teams')
+  myRosters={}; savedRosters={}; myCaptainId=null; myCaptain2Id=null; myChip=null;
+  myTransferCount=0; savedTransferCount=0; isDirty=false;
+  const {data:newTeam}=await sb.from('teams')
     .insert({user_id:currentUser.userId,tournament_id:TOURNAMENT.id,team_name:myTeamName})
     .select('id,team_name').single();
   if(newTeam){ myTeamId=newTeam.id; myTeamName=newTeam.team_name; }
@@ -828,7 +947,7 @@ async function deleteMyTeam(){
   toast('Team reset ✓');
 }
 
-function resetTeamToSaved(){ toast('No local save — changes are auto-saved to cloud'); }
+function resetTeamToSaved(){ discardDraft(); }
 
 // ===== PLAYERS PAGE =====
 function setPlayersFilter(f,el){ playersFilter=f; document.querySelectorAll('#page-players .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPlayersPage(); }

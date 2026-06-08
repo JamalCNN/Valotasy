@@ -213,6 +213,7 @@
       <div>
         <div style="font-size:10px;font-weight:500;letter-spacing:1px;color:var(--muted);margin-bottom:10px;text-transform:uppercase">Click a slot to pick a player · Max 2 per VCT team</div>
         <div class="slots-grid" id="slotsGrid"></div>
+        <div id="changesPanel" style="display:none;margin-top:12px"></div>
         <div style="margin-top:12px;font-size:11px;font-weight:500;color:var(--muted)">
           Total score this MD: <span style="color:var(--red);font-size:22px;font-weight:600" id="myTotalPts">0</span> pts
         </div>
@@ -231,11 +232,11 @@
     </div>
   </div>
   <div class="save-bar">
-    <div class="save-info" id="saveInfo">Not saved yet</div>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-outline" onclick="resetTeamToSaved()">↩ Reset</button>
+    <div class="save-info" id="saveInfo">All changes saved</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn btn-outline" id="discardBtn" onclick="discardDraft()" style="display:none">✕ Discard</button>
       <button class="btn btn-outline" style="border-color:rgba(255,70,85,0.3);color:var(--red)" onclick="deleteMyTeam()">🗑 Remove</button>
-      <button class="btn btn-red" onclick="saveAndSubmit()">Save Team</button>
+      <button class="btn btn-red" id="confirmBtn" onclick="confirmTeam()">✓ Save Team</button>
     </div>
   </div>
 </div>

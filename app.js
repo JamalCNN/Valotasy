@@ -970,10 +970,12 @@ async function updatePlayerPrices(mdId){
     .eq('matchday_id', mdId);
 
   if(error || !cache?.length){
+    console.error('updatePlayerPrices: no cache data', {error, mdId, cacheLen: cache?.length});
     toast('No match data for this matchday');
     if(btn) btn.textContent = '💰 Update Prices';
     return;
   }
+  console.log(`updatePlayerPrices: ${cache.length} cache rows for matchday ${mdId}`);
 
   // Sum raw pts per player across all matches in the matchday
   const ptsMap = {};
@@ -990,9 +992,11 @@ async function updatePlayerPrices(mdId){
     if(r.is_winner){ pts+=2; if(r.clean_sheet_win) pts+=1; }
     ptsMap[n] += pts;
   }
+  console.log('ptsMap (scraped name → pts):', ptsMap);
 
   // Fetch all players and match case-insensitively against scraped names
-  const {data:allPlayers} = await sb.from('players').select('id,name,price').eq('tournament_id', TOURNAMENT.id);
+  const {data:allPlayers, error:playerErr} = await sb.from('players').select('id,name,price').eq('tournament_id', TOURNAMENT.id);
+  console.log(`allPlayers: ${allPlayers?.length} rows`, playerErr||'');
 
   // Build a lowercase lookup from scraped names → pts
   const ptsMapLower = {};

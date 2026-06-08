@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS rosters (
   team_id   UUID  NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
   slot      TEXT  NOT NULL CHECK (slot IN ('duel','init','ctrl','sent','any1','any2','any3')),
   player_id BIGINT REFERENCES players(id) ON DELETE SET NULL,
+  buy_price REAL,   -- price paid at time of pick, never changes with market
   PRIMARY KEY (team_id, slot)
 );
 

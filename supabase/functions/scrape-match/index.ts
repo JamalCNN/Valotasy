@@ -319,6 +319,12 @@ Deno.serve(async (req) => {
     const { data: existing } = await sb.from("processed_matches").select("match_id").eq("match_id", matchId).single();
     if (existing) return json({ error: `Match ${matchId} already processed` }, 409);
 
+    // Refuse if matchday scores are locked (market is open for next matchday)
+    const { data: matchdayRow } = await sb.from("matchdays").select("scores_locked").eq("id", matchday_id).single();
+    if (matchdayRow?.scores_locked) {
+      return json({ error: `MD${matchday_id} scores are locked — market is open, cannot rescore` }, 423);
+    }
+
     // Fetch VLR pages
     const baseUrl = `https://www.vlr.gg/${matchId}`;
     const [ovHtml, perfHtml] = await Promise.all([

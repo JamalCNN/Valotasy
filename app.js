@@ -334,33 +334,45 @@ async function renderLB(){
     `<button class="md-btn ${md.id===lbMDId?'on':''}" onclick="lbMDId=${md.id};renderLB();startCountdown()">${md.label}</button>`
   ).join('');
 
-  const [{data:teams},{data:mdScores},{data:chips}] = await Promise.all([
-    sb.from('teams').select('id,team_name,total_points,users!inner(manager_name)').eq('tournament_id',TOURNAMENT.id).order('total_points',{ascending:false}),
+  // IDs of all matchdays up to and including the selected one (for cumulative total)
+  const mdIdsUpTo = MATCHDAYS.filter(m=>m.matchday_number<=(curMD?.matchday_number||0)).map(m=>m.id);
+
+  const [{data:teams},{data:mdScores},{data:allScores},{data:chips}] = await Promise.all([
+    sb.from('teams').select('id,team_name,users!inner(manager_name)').eq('tournament_id',TOURNAMENT.id),
     sb.from('matchday_scores').select('team_id,net_points').eq('matchday_id',lbMDId),
+    mdIdsUpTo.length
+      ? sb.from('matchday_scores').select('team_id,net_points').in('matchday_id',mdIdsUpTo)
+      : Promise.resolve({data:[]}),
     sb.from('active_chips').select('team_id,chip_name').eq('matchday_id',lbMDId),
   ]);
 
-  const scoreMap={}, chipMap={};
-  for(const s of (mdScores||[])) scoreMap[s.team_id]=s.net_points;
-  for(const c of (chips||[]))    chipMap[c.team_id]=c.chip_name;
+  // Cumulative total through the selected matchday (frozen — based on locked matchday_scores rows)
+  const cumulMap={}, scoreMap={}, chipMap={};
+  for(const s of (allScores||[]))  cumulMap[s.team_id]=(cumulMap[s.team_id]||0)+(s.net_points||0);
+  for(const s of (mdScores||[]))   scoreMap[s.team_id]=s.net_points;
+  for(const c of (chips||[]))      chipMap[c.team_id]=c.chip_name;
 
-  const topMD = teams?.length ? Math.max(0,...(teams.map(t=>scoreMap[t.id]||0))) : 0;
+  // Sort by cumulative total at end of selected matchday
+  const sorted=[...(teams||[])].sort((a,b)=>(cumulMap[b.id]||0)-(cumulMap[a.id]||0));
+
+  const topMD = sorted.length ? Math.max(0,...sorted.map(t=>scoreMap[t.id]||0)) : 0;
   document.getElementById('statsStrip').innerHTML=`
-    <div class="stat-box"><div class="stat-lbl">Leader</div><div class="stat-val" style="font-size:20px">${teams?.[0]?.users?.manager_name||'—'}</div></div>
+    <div class="stat-box"><div class="stat-lbl">Leader</div><div class="stat-val" style="font-size:20px">${sorted[0]?.users?.manager_name||'—'}</div></div>
     <div class="stat-box"><div class="stat-lbl">Top MD</div><div class="stat-val">${topMD||'—'}</div></div>
-    <div class="stat-box"><div class="stat-lbl">Teams</div><div class="stat-val">${teams?.length||0}</div></div>
+    <div class="stat-box"><div class="stat-lbl">Teams</div><div class="stat-val">${sorted.length||0}</div></div>
     <div class="stat-box"><div class="stat-lbl">Matchday</div><div class="stat-val">${curMD?.label||'—'}</div></div>`;
 
   renderLBDeadline();
   const body = document.getElementById('lbBody');
-  if(!teams?.length){
+  if(!sorted.length){
     body.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted);font-size:12px;letter-spacing:1px;text-transform:uppercase">No teams yet — invite your friends!</div>';
     return;
   }
   const marketOpen = !isMarketLocked(curMD);
-  body.innerHTML = teams.map((t,i)=>{
+  body.innerHTML = sorted.map((t,i)=>{
     const gc=i===0?'g1':i===1?'g2':i===2?'g3':'';
-    const mdPts = scoreMap[t.id]??0;
+    const mdPts  = scoreMap[t.id]??0;
+    const cumul  = cumulMap[t.id]||0;
     const chipId = chipMap[t.id];
     const chipObj = chipId?CHIPS.find(c=>c.id===chipId):null;
     const hiClass = mdPts===topMD&&topMD>0?'hi':'';
@@ -368,7 +380,7 @@ async function renderLB(){
     <div class="lb-row ${gc}" style="animation-delay:${i*.05}s" onclick="expandTeam('exp${i}','${t.id}')">
       <div class="rank-n">${i+1}</div>
       <div class="team-col"><div class="team-nm">${t.team_name}</div><div class="team-mgr">${t.users?.manager_name||''}</div></div>
-      <div class="pts-big c">${t.total_points||0}</div>
+      <div class="pts-big c">${cumul}</div>
       <div class="pts-md c ${hiClass}">${mdPts>=0?'+':''}${mdPts}</div>
       <div class="chip-col">${!marketOpen&&chipObj?`<span title="${chipObj.name}">${chipObj.icon}</span>`:'<span style="color:var(--muted);font-size:11px">—</span>'}</div>
       <div class="mv c" style="color:var(--muted)">—</div>
@@ -1015,18 +1027,20 @@ function renderAdminMatchdays(){
         <span style="font-size:12px;font-weight:600;flex:1;min-width:140px">${fx.team_a} <span style="color:var(--muted);font-weight:400">vs</span> ${fx.team_b} <span style="color:var(--muted);font-size:10px">· ${timeStr}</span></span>
         <span style="font-size:9px;padding:2px 6px;border-radius:2px;white-space:nowrap;background:${done?'rgba(74,222,128,0.12)':'rgba(255,255,255,0.05)'};color:${done?'#4ade80':'var(--muted)'}">${done?'SCORED':'SCHEDULED'}</span>
         <input id="fx_url_${fx.id}" value="${fx.vlr_match_url||''}" placeholder="VLR.gg URL..." ${done?'disabled':''} style="background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:4px 8px;font-size:11px;outline:none;border-radius:3px;width:180px;${done?'opacity:0.4':''}">
-        <button onclick="scoreFixture(${fx.id},${md.id})" class="btn-sm ${done?'':'btn-edit'}" ${done?'disabled':''} style="${done?'opacity:0.4':''}">⚡</button>
+        <button onclick="scoreFixture(${fx.id},${md.id})" class="btn-sm ${done||md.scores_locked?'':'btn-edit'}" ${done||md.scores_locked?'disabled':''} style="${done||md.scores_locked?'opacity:0.4':''}">⚡</button>
         <button onclick="deleteFixture(${fx.id})" class="btn-sm btn-del">✕</button>
       </div>`;
     }).join('') : `<div style="font-size:11px;color:var(--muted);padding:6px 0">No fixtures yet</div>`;
 
     return `
     <div style="padding:12px 0;border-bottom:0.5px solid var(--border2)">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
         <span style="font-size:12px;font-weight:600">${md.label}</span>
         <span style="font-size:9px;color:var(--muted)">${md.phase}</span>
         <span style="font-size:9px;padding:2px 6px;border-radius:2px;background:${md.market_open?'rgba(74,222,128,0.15)':'rgba(255,70,85,0.1)'};color:${md.market_open?'#4ade80':'var(--red)'}">${md.market_open?'OPEN':'LOCKED'}</span>
+        ${md.scores_locked?`<span style="font-size:9px;padding:2px 6px;border-radius:2px;background:rgba(250,204,21,0.12);color:#facc15">📊 SCORES FINAL</span>`:''}
         <button onclick="setMarket(${md.id},${!md.market_open})" class="btn-sm ${md.market_open?'btn-del':'btn-edit'}" style="margin-left:auto">${md.market_open?'🔒 Lock':'🔓 Open'}</button>
+        <button onclick="lockMatchdayScores(${md.id},${!md.scores_locked})" class="btn-sm" style="font-size:9px;background:${md.scores_locked?'rgba(250,204,21,0.1)':'rgba(255,255,255,0.06)'};border:0.5px solid ${md.scores_locked?'rgba(250,204,21,0.3)':'var(--border2)'};color:${md.scores_locked?'#facc15':'var(--muted)'}">${md.scores_locked?'🔓 Unlock Scores':'📊 Lock Scores'}</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:${dlDisplay?'4px':'8px'}">
         <span style="font-size:10px;font-weight:500;letter-spacing:0.5px;color:var(--muted);text-transform:uppercase;white-space:nowrap">⏰ Deadline</span>
@@ -1078,10 +1092,28 @@ function renderAdminMatchdays(){
 async function setMarket(mdId, open){
   await sb.from('matchdays').update({market_open:open}).eq('id',mdId);
   const md=MATCHDAYS.find(m=>m.id===mdId); if(md) md.market_open=open;
+  if(open){
+    // Auto-lock scores for all matchdays before this one
+    const openedMD=MATCHDAYS.find(m=>m.id===mdId);
+    if(openedMD){
+      const toLock=MATCHDAYS.filter(m=>m.matchday_number<openedMD.matchday_number&&!m.scores_locked);
+      if(toLock.length){
+        await sb.from('matchdays').update({scores_locked:true}).in('id',toLock.map(m=>m.id));
+        toLock.forEach(m=>m.scores_locked=true);
+      }
+    }
+  }
   const openMD=[...MATCHDAYS].reverse().find(m=>m.market_open);
   currentMDId=openMD?.id||MATCHDAYS[MATCHDAYS.length-1]?.id||null;
   renderAdminMatchdays();
   toast(`${open?'Market opened':'Market locked'} ✓`);
+}
+
+async function lockMatchdayScores(mdId, lock){
+  await sb.from('matchdays').update({scores_locked:lock}).eq('id',mdId);
+  const md=MATCHDAYS.find(m=>m.id===mdId); if(md) md.scores_locked=lock;
+  renderAdminMatchdays();
+  toast(lock?'Scores locked ✓':'Scores unlocked ✓');
 }
 
 async function setDeadline(mdId){

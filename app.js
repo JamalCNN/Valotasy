@@ -879,7 +879,7 @@ async function updatePlayerPrices(mdId){
   for(const p of (players||[])){
     const score = scoreMap[p.id] ?? 0;
     const d = priceChangeDelta(score);
-    const newPrice = Math.max(0, +(p.price + d).toFixed(1));
+    const newPrice = Math.min(30, Math.max(4, +(p.price + d).toFixed(1)));
     await sb.from('players').update({previous_price: p.price, price: newPrice}).eq('id', p.id);
     const localP = PLAYERS.find(pl=>pl.id===p.id);
     if(localP) localP.price = newPrice;

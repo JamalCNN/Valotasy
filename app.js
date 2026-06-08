@@ -478,23 +478,93 @@ function renderTransferInfo(curMD, locked){
   }
 }
 
+let dragSlot=null;
+
 function renderSlots(){
   document.getElementById('slotsGrid').innerHTML=SLOTS.map(sl=>{
     const p=myRosters[sl.id];
     const isCap=p&&(myCaptainId===p.id||myCaptain2Id===p.id);
     const pts=p?mySlotScores[p.id]||0:0;
     const dispPts=isCap?pts*2:pts;
-    return p?`<div class="slot filled ${isCap?'cap-slot':''}">
-      <div class="slot-label" style="display:flex;justify-content:space-between;align-items:center">
-        <span>${sl.label}</span>
-        <button onclick="event.stopPropagation();removePlayer('${sl.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;transition:.2s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
-      </div>
-      ${isCap?'<div class="cap-badge">C</div>':''}
-      <div class="slot-name" onclick="openPicker('${sl.id}','${sl.label}')" style="cursor:pointer">${p.name}</div>
-      <div class="slot-team" onclick="openPicker('${sl.id}','${sl.label}')" style="cursor:pointer">${p.vct_team} · <span class="tag tag-${p.tier}" style="font-size:8px">${p.tier}</span> · <span style="color:var(--accent)">${p.price}M</span></div>
-      <div class="slot-pts">${dispPts}</div></div>`
-    :`<div class="slot" onclick="openPicker('${sl.id}','${sl.label}')"><div class="slot-label">${sl.label}</div><div class="slot-empty">+ Pick a player</div></div>`;
+    return p
+      ?`<div id="slot_${sl.id}" class="slot filled ${isCap?'cap-slot':''}" draggable="true"
+          ondragstart="slotDragStart(event,'${sl.id}')" ondragend="slotDragEnd(event,'${sl.id}')"
+          ondragover="slotDragOver(event,'${sl.id}')" ondragleave="slotDragLeave('${sl.id}')" ondrop="slotDrop(event,'${sl.id}')">
+          <div class="slot-label" style="display:flex;justify-content:space-between;align-items:center">
+            <span>${sl.label}</span>
+            <button onclick="event.stopPropagation();removePlayer('${sl.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;transition:.2s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
+          </div>
+          ${isCap?'<div class="cap-badge">C</div>':''}
+          <div class="slot-name" onclick="openPicker('${sl.id}','${sl.label}')" style="cursor:pointer">${p.name}</div>
+          <div class="slot-team" onclick="openPicker('${sl.id}','${sl.label}')" style="cursor:pointer">${p.vct_team} · <span class="tag tag-${p.tier}" style="font-size:8px">${p.tier}</span> · <span style="color:var(--accent)">${p.price}M</span></div>
+          <div class="slot-pts">${dispPts}</div>
+        </div>`
+      :`<div id="slot_${sl.id}" class="slot"
+          onclick="openPicker('${sl.id}','${sl.label}')"
+          ondragover="slotDragOver(event,'${sl.id}')" ondragleave="slotDragLeave('${sl.id}')" ondrop="slotDrop(event,'${sl.id}')">
+          <div class="slot-label">${sl.label}</div>
+          <div class="slot-empty">+ Pick a player</div>
+        </div>`;
   }).join('');
+}
+
+function slotDragStart(e,slotId){
+  dragSlot=slotId;
+  e.dataTransfer.effectAllowed='move';
+  setTimeout(()=>{ const el=document.getElementById('slot_'+slotId); if(el) el.style.opacity='0.4'; },0);
+}
+function slotDragEnd(e,slotId){
+  dragSlot=null;
+  const el=document.getElementById('slot_'+slotId); if(el) el.style.opacity='1';
+  document.querySelectorAll('.slot.drag-over').forEach(el=>el.classList.remove('drag-over'));
+}
+function slotDragOver(e,slotId){
+  e.preventDefault(); e.dataTransfer.dropEffect='move';
+  if(slotId===dragSlot) return;
+  document.getElementById('slot_'+slotId)?.classList.add('drag-over');
+}
+function slotDragLeave(slotId){
+  document.getElementById('slot_'+slotId)?.classList.remove('drag-over');
+}
+async function slotDrop(e,targetId){
+  e.preventDefault();
+  document.getElementById('slot_'+targetId)?.classList.remove('drag-over');
+  const fromId=dragSlot; dragSlot=null;
+  if(!fromId||fromId===targetId) return;
+
+  const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
+  if(isMarketLocked(curMD)){toast('Market is closed');return;}
+
+  const fromPlayer=myRosters[fromId];
+  const toPlayer=myRosters[targetId];
+  if(!fromPlayer) return;
+
+  // Role validation
+  const fromDef=SLOTS.find(s=>s.id===fromId);
+  const toDef=SLOTS.find(s=>s.id===targetId);
+  if(!toDef.roles.includes(fromPlayer.role)){toast(`${fromPlayer.name} can't play ${toDef.label}`);return;}
+  if(toPlayer&&!fromDef.roles.includes(toPlayer.role)){toast(`${toPlayer.name} can't play ${fromDef.label}`);return;}
+
+  const fromBuy=myBuyPrices[fromId];
+  const toBuy=myBuyPrices[targetId];
+
+  if(toPlayer){
+    // Swap both players between slots — no transfer, keep buy prices with the player
+    await Promise.all([
+      sb.from('rosters').upsert({team_id:myTeamId,slot:fromId,player_id:toPlayer.id,buy_price:toBuy},{onConflict:'team_id,slot'}),
+      sb.from('rosters').upsert({team_id:myTeamId,slot:targetId,player_id:fromPlayer.id,buy_price:fromBuy},{onConflict:'team_id,slot'}),
+    ]);
+    myRosters[fromId]=toPlayer; myBuyPrices[fromId]=toBuy;
+    myRosters[targetId]=fromPlayer; myBuyPrices[targetId]=fromBuy;
+  } else {
+    // Move to empty slot — no transfer
+    await sb.from('rosters').upsert({team_id:myTeamId,slot:targetId,player_id:fromPlayer.id,buy_price:fromBuy},{onConflict:'team_id,slot'});
+    await sb.from('rosters').delete().eq('team_id',myTeamId).eq('slot',fromId);
+    myRosters[targetId]=fromPlayer; myBuyPrices[targetId]=fromBuy;
+    delete myRosters[fromId]; delete myBuyPrices[fromId];
+  }
+  renderTeamPage();
+  toast('Squad updated ✓');
 }
 
 async function removePlayer(slotId){

@@ -955,13 +955,19 @@ async function resetPrices(){
 }
 
 async function resetAllPrices(){
-  if(!confirm('Reset ALL player prices to their original base prices?')) return;
-  const {data:players}=await sb.from('players').select('id,base_price').eq('tournament_id',TOURNAMENT.id).not('base_price','is',null);
-  if(!players?.length){toast('No base prices stored');return;}
+  if(!confirm('Reset ALL player prices by tier? (S=24M A=16M B=10M C=6M)')) return;
+  const TIER_PRICE={S:24,A:16,B:10,C:6};
+  const {data:players}=await sb.from('players').select('id,tier,price').eq('tournament_id',TOURNAMENT.id);
+  if(!players?.length){toast('No players found');return;}
   for(const p of players){
-    await sb.from('players').update({price:p.base_price,previous_price:null}).eq('id',p.id);
+    const base=TIER_PRICE[p.tier];
+    if(base===undefined) continue;
+    await sb.from('players').update({price:base,previous_price:p.price}).eq('id',p.id);
+    const localP=PLAYERS.find(pl=>pl.id===p.id);
+    if(localP) localP.price=base;
   }
-  toast(`🔄 All prices reset to base for ${players.length} players ✓`);
+  renderAdminPlayers();
+  toast(`🔄 All prices reset by tier for ${players.length} players ✓`);
 }
 
 // ===== PREDICTIONS =====

@@ -639,13 +639,36 @@ async function pickPlayer(pid){
   if(!pickerSlot) return;
   const p=PLAYERS.find(pl=>pl.id===pid); if(!p) return;
   const oldP=myRosters[pickerSlot];
-  // Sell price = min(buy_price, current_price): no profit from rises, losses apply for drops
+
+  // Check if player is already in the squad (different slot) — internal move, not a transfer
+  const existingSlot=Object.keys(myRosters).find(s=>s!==pickerSlot&&myRosters[s]?.id===p.id);
+
+  if(existingSlot){
+    // Internal rearrangement: move player to new slot, clear their old slot
+    // No budget change, no transfer logged, keep original buy_price
+    const oldBuyPrice=myBuyPrices[existingSlot];
+    await sb.from('rosters').upsert({team_id:myTeamId,slot:pickerSlot,player_id:p.id,buy_price:oldBuyPrice},{onConflict:'team_id,slot'});
+    await sb.from('rosters').delete().eq('team_id',myTeamId).eq('slot',existingSlot);
+    myRosters[pickerSlot]=p; myBuyPrices[pickerSlot]=oldBuyPrice;
+    delete myRosters[existingSlot]; delete myBuyPrices[existingSlot];
+    // Handle displaced player in old slot (if any)
+    if(oldP && oldP.id!==p.id){
+      const sellValue=Math.min(myBuyPrices[pickerSlot]||oldP.price, oldP.price);
+      myBudgetAdj -= (myBuyPrices[pickerSlot]||0) - sellValue;
+      if(myCaptainId===oldP.id) myCaptainId=null;
+      if(myCaptain2Id===oldP.id) myCaptain2Id=null;
+    }
+    await sb.from('teams').update({captain_id:myCaptainId,captain2_id:myCaptain2Id,budget_adjustment:myBudgetAdj}).eq('id',myTeamId);
+    closePicker(); renderTeamPage(); toast(`${p.name} moved ✓`);
+    return;
+  }
+
+  // Normal pick: buying from the market
   const sellValue=oldP ? Math.min(myBuyPrices[pickerSlot]||0, oldP.price||0) : 0;
-  const net=sellValue-(p.price||0);
   if(calcBudget()-(myBuyPrices[pickerSlot]||0)+sellValue-p.price<0){toast('Not enough budget!');return;}
   const isMD1=MATCHDAYS[0]?.id===currentMDId;
   const isWildcard=myChip==='wildcard';
-  // Log transfer if swapping (not first pick, not MD1, not wildcard)
+  // Log transfer if replacing a different player (not first pick, not MD1, not wildcard)
   if(oldP&&oldP.id!==p.id&&!isMD1&&!isWildcard&&currentMDId){
     const penApplied=myTransferCount>=2;
     await sb.from('transfers').insert({team_id:myTeamId,matchday_id:currentMDId,slot:pickerSlot,old_player_id:oldP.id,new_player_id:p.id,penalty_applied:penApplied});
@@ -653,16 +676,12 @@ async function pickPlayer(pid){
   }
   // Record realized loss if selling below buy price (price dropped)
   if(oldP){ myBudgetAdj -= (myBuyPrices[pickerSlot]||0) - sellValue; }
-  // Upsert roster
   await sb.from('rosters').upsert({team_id:myTeamId,slot:pickerSlot,player_id:p.id,buy_price:p.price},{onConflict:'team_id,slot'});
   myRosters[pickerSlot]=p; myBuyPrices[pickerSlot]=p.price;
   if(myCaptainId===oldP?.id)  myCaptainId=null;
   if(myCaptain2Id===oldP?.id) myCaptain2Id=null;
-  const teamUpdate={captain_id:myCaptainId,captain2_id:myCaptain2Id,budget_adjustment:myBudgetAdj};
-  await sb.from('teams').update(teamUpdate).eq('id',myTeamId);
-  closePicker();
-  renderTeamPage();
-  toast(`${p.name} added ✓`);
+  await sb.from('teams').update({captain_id:myCaptainId,captain2_id:myCaptain2Id,budget_adjustment:myBudgetAdj}).eq('id',myTeamId);
+  closePicker(); renderTeamPage(); toast(`${p.name} added ✓`);
 }
 
 // ===== SAVE / SUBMIT =====

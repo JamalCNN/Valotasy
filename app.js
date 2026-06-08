@@ -767,7 +767,6 @@ function renderAdminMatchdays(){
         <span style="font-size:9px;color:var(--muted)">${md.phase}</span>
         <span style="font-size:9px;padding:2px 6px;border-radius:2px;background:${md.market_open?'rgba(74,222,128,0.15)':'rgba(255,70,85,0.1)'};color:${md.market_open?'#4ade80':'var(--red)'}">${md.market_open?'OPEN':'LOCKED'}</span>
         <button onclick="setMarket(${md.id},${!md.market_open})" class="btn-sm ${md.market_open?'btn-del':'btn-edit'}" style="margin-left:auto">${md.market_open?'🔒 Lock':'🔓 Open'}</button>
-        ${mdFixtures.some(f=>f.status==='completed')?`<button onclick="updatePrices(${md.id})" class="btn-sm btn-edit">💰 Update Prices</button>`:''}
       </div>
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:${dlDisplay?'4px':'8px'}">
         <span style="font-size:10px;font-weight:500;letter-spacing:0.5px;color:var(--muted);text-transform:uppercase;white-space:nowrap">⏰ Deadline</span>
@@ -844,16 +843,15 @@ async function clearDeadline(mdId){
 }
 
 // ── Price Change Formula ─────────────────────────────────────────
-// Based on player's total raw_pts across all matches in a matchday
-// > 23 → +1.5M | 20-23 → +1M | 16-19 → +0.5M | 8-15 → 0
-// 5-7 → -0.5M | 2-4 → -1M | < 2 → -1.5M | Max 30M · Min 4M
+// >23→+1.5M | 18-23→+1M | 13-17→+0.5M | 6-12→0
+// 3-5→-0.5M | 0-2→-1M | <0→-1.5M
 function priceChangeDelta(score){
   if(score > 23)  return  1.5;
-  if(score >= 20) return  1.0;
-  if(score >= 16) return  0.5;
-  if(score >= 8)  return  0.0;
-  if(score >= 5)  return -0.5;
-  if(score >= 2)  return -1.0;
+  if(score >= 18) return  1.0;
+  if(score >= 13) return  0.5;
+  if(score >= 6)  return  0.0;
+  if(score >= 3)  return -0.5;
+  if(score >= 0)  return -1.0;
   return -1.5;
 }
 
@@ -861,7 +859,6 @@ async function updatePlayerPrices(mdId){
   const btn = document.getElementById('priceBtn_'+mdId);
   if(btn) btn.textContent = 'Updating...';
 
-  // Sum raw_pts per player for this matchday (raw = before captain multiplier)
   const {data:logs, error} = await sb.from('score_logs')
     .select('player_id, raw_pts').eq('matchday_id', mdId);
 
@@ -871,7 +868,6 @@ async function updatePlayerPrices(mdId){
     return;
   }
 
-  // Aggregate raw_pts per player across all matches in the matchday
   const scoreMap = {};
   for(const l of logs){
     scoreMap[l.player_id] = (scoreMap[l.player_id]||0) + (l.raw_pts||0);
@@ -880,27 +876,19 @@ async function updatePlayerPrices(mdId){
   const playerIds = Object.keys(scoreMap).map(Number);
   const {data:players} = await sb.from('players').select('id,name,price').in('id',playerIds);
 
-  const updates = [];
   for(const p of (players||[])){
     const score = scoreMap[p.id] ?? 0;
-    const delta = priceChangeDelta(score);
-    const newPrice = Math.min(30, Math.max(4, +(p.price + delta).toFixed(1)));
-    if(newPrice !== p.price){
-      updates.push({id: p.id, newPrice, score, delta});
-    }
-  }
-
-  // Apply updates
-  for(const u of updates){
-    await sb.from('players').update({price: u.newPrice}).eq('id', u.id);
-    const localP = PLAYERS.find(p=>p.id===u.id);
-    if(localP) localP.price = u.newPrice;
+    const d = priceChangeDelta(score);
+    const newPrice = Math.max(0, +(p.price + d).toFixed(1));
+    await sb.from('players').update({previous_price: p.price, price: newPrice}).eq('id', p.id);
+    const localP = PLAYERS.find(pl=>pl.id===p.id);
+    if(localP) localP.price = newPrice;
   }
 
   renderAdminPlayers();
   if(btn) btn.textContent = '💰 Update Prices';
   const md = MATCHDAYS.find(m=>m.id===mdId);
-  toast(`MD ${md?.label||mdId}: Prices updated for ${updates.length} players ✓`);
+  toast(`💰 Prices updated for ${players?.length||0} players ✓`);
 }
 
 async function addFixture(mdId){
@@ -956,49 +944,6 @@ async function scoreFixture(fxId, mdId){
   }
 }
 
-async function updatePrices(mdId){
-  toast('⏳ Calculating price changes...');
-  const {data:cache,error}=await sb.from('match_player_cache').select('*').eq('matchday_id',mdId);
-  if(error||!cache?.length){toast('No match data for this matchday');return;}
-
-  // Sum raw points per player across all matches in the matchday
-  const playerPts={};
-  for(const row of cache){
-    const n=row.player_name;
-    if(!playerPts[n]) playerPts[n]=0;
-    let pts=0;
-    pts+=Math.floor(row.kills/10);
-    pts+=row.k4*3; pts+=row.k5*4; pts+=row.k6*5; pts+=row.k7*5;
-    pts+=(row.clutch_1v2+row.clutch_1v3+row.clutch_1v4+row.clutch_1v5);
-    const rank=row.rating_rank;
-    if(rank===1) pts+=3; else if(rank===2) pts+=2; else if(rank===3) pts+=1;
-    if(row.is_lowest_rating) pts-=3;
-    if(row.is_winner){pts+=2; if(row.clean_sheet_win) pts+=1;}
-    playerPts[n]+=pts;
-  }
-
-  const delta=(pts)=>{
-    if(pts>23) return 1.5;
-    if(pts>=18) return 1;
-    if(pts>=13) return 0.5;
-    if(pts>=6)  return 0;
-    if(pts>=3)  return -0.5;
-    if(pts>=0)  return -1;
-    return -1.5;
-  };
-
-  const {data:players}=await sb.from('players').select('id,name,price').eq('tournament_id',TOURNAMENT.id);
-  let updated=0;
-  for(const p of (players||[])){
-    const pts=playerPts[p.name];
-    if(pts===undefined) continue;
-    const d=delta(pts);
-    const newPrice=Math.max(0,+(p.price+d).toFixed(1));
-    await sb.from('players').update({previous_price:p.price,price:newPrice}).eq('id',p.id);
-    updated++;
-  }
-  toast(`💰 Prices updated for ${updated} players ✓`);
-}
 
 async function resetPrices(){
   const {data:players}=await sb.from('players').select('id,price,previous_price').eq('tournament_id',TOURNAMENT.id).not('previous_price','is',null);

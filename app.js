@@ -484,35 +484,53 @@ async function expandTeam(expId, teamId){
   el.innerHTML='<div style="text-align:center;padding:16px;font-size:12px;color:var(--muted)">Loading...</div>';
   el.classList.add('open');
 
-  // Use separate queries to avoid FK join issues
-  const [{data:rosters},{data:logs},{data:teamRow}] = await Promise.all([
-    sb.from('rosters').select('slot,player_id').eq('team_id',teamId),
-    sb.from('score_logs').select('player_id,final_pts').eq('team_id',teamId).eq('matchday_id',lbMDId),
-    sb.from('teams').select('captain_id,captain2_id').eq('id',teamId).single(),
-  ]);
-
-  const playerIds = (rosters||[]).map(r=>r.player_id).filter(Boolean);
-  const {data:playerList} = playerIds.length
-    ? await sb.from('players').select('id,name,role,vct_team').in('id',playerIds)
-    : {data:[]};
-
-  const playerMap={};
-  for(const p of (playerList||[])) playerMap[p.id]=p;
-
-  const logMap={};
-  for(const l of (logs||[])) logMap[l.player_id]=(logMap[l.player_id]||0)+l.final_pts;
+  // Use score_logs for the selected matchday — this is the frozen MD snapshot.
+  // score_logs records exactly which players were in which slots when matches were scored,
+  // so it correctly shows the squad AS IT WAS during that matchday, not the current roster.
+  const {data:logs} = await sb.from('score_logs')
+    .select('player_id,player_name,slot,is_captain,final_pts')
+    .eq('team_id',teamId).eq('matchday_id',lbMDId);
 
   const chips = document.createElement('div'); chips.className='player-chips';
-  for(const r of (rosters||[])){
-    if(!r.player_id) continue;
-    const p=playerMap[r.player_id]; if(!p) continue;
-    const pts=logMap[p.id]||0;
-    const isCap=teamRow?.captain_id===p.id||teamRow?.captain2_id===p.id;
-    chips.innerHTML+=`<div class="pc ${isCap?'cap':''}">
-      <div class="pc-role">${p.role}</div>
-      <div class="pc-name">${p.name}</div>
-      <div class="pc-team">${p.vct_team}</div>
-      <div class="pc-pts">${pts} pts</div></div>`;
+
+  if(!logs?.length){
+    // No score data yet — fall back to current rosters (current matchday, pre-scoring)
+    const [{data:rosters},{data:teamRow}] = await Promise.all([
+      sb.from('rosters').select('slot,player_id').eq('team_id',teamId),
+      sb.from('teams').select('captain_id,captain2_id').eq('id',teamId).single(),
+    ]);
+    const playerIds=(rosters||[]).map(r=>r.player_id).filter(Boolean);
+    const {data:playerList}=playerIds.length?await sb.from('players').select('id,name,role,vct_team').in('id',playerIds):{data:[]};
+    const playerMap={};
+    for(const p of (playerList||[])) playerMap[p.id]=p;
+    for(const r of (rosters||[])){
+      if(!r.player_id) continue;
+      const p=playerMap[r.player_id]; if(!p) continue;
+      const isCap=teamRow?.captain_id===p.id||teamRow?.captain2_id===p.id;
+      chips.innerHTML+=`<div class="pc ${isCap?'cap':''}">
+        <div class="pc-role">${p.role}</div><div class="pc-name">${p.name}</div>
+        <div class="pc-team">${p.vct_team}</div><div class="pc-pts">— pts</div></div>`;
+    }
+  } else {
+    // Aggregate multiple matches within the same matchday per slot
+    const slotMap={};
+    for(const l of logs){
+      if(!slotMap[l.slot]) slotMap[l.slot]={player_id:l.player_id,player_name:l.player_name,is_captain:l.is_captain,pts:0};
+      slotMap[l.slot].pts+=(l.final_pts||0);
+    }
+    // Fetch role/vct_team for display
+    const playerIds=[...new Set(Object.values(slotMap).map(s=>s.player_id).filter(Boolean))];
+    const {data:playerList}=playerIds.length?await sb.from('players').select('id,role,vct_team').in('id',playerIds):{data:[]};
+    const playerMeta={};
+    for(const p of (playerList||[])) playerMeta[p.id]=p;
+
+    for(const sl of SLOTS){
+      const entry=slotMap[sl.id]; if(!entry) continue;
+      const meta=playerMeta[entry.player_id]||{};
+      chips.innerHTML+=`<div class="pc ${entry.is_captain?'cap':''}">
+        <div class="pc-role">${meta.role||sl.label}</div><div class="pc-name">${entry.player_name}</div>
+        <div class="pc-team">${meta.vct_team||''}</div><div class="pc-pts">${entry.pts} pts</div></div>`;
+    }
   }
 
   // Guard: only update if element is still in the DOM (not wiped by re-render)

@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS players (
   role          TEXT NOT NULL  CHECK (role IN ('Duelist','Initiator','Controller','Sentinel')),
   tier          TEXT NOT NULL  CHECK (tier IN ('S','A','B','C')),
   price          REAL NOT NULL,
+  base_price     REAL,              -- original price, never changes — used for full reset
   previous_price REAL,
   UNIQUE (tournament_id, name)
 );

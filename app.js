@@ -1009,6 +1009,16 @@ async function resetPrices(){
   toast(`↩️ Prices reset for ${players.length} players ✓`);
 }
 
+async function resetAllPrices(){
+  if(!confirm('Reset ALL player prices to their original base prices?')) return;
+  const {data:players}=await sb.from('players').select('id,base_price').eq('tournament_id',TOURNAMENT.id).not('base_price','is',null);
+  if(!players?.length){toast('No base prices stored');return;}
+  for(const p of players){
+    await sb.from('players').update({price:p.base_price,previous_price:null}).eq('id',p.id);
+  }
+  toast(`🔄 All prices reset to base for ${players.length} players ✓`);
+}
+
 // ===== PREDICTIONS =====
 async function renderPredictPage(){
   const el=document.getElementById('predictContainer');

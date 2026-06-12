@@ -120,7 +120,7 @@ let savedTransferCount = 0;
 let isDirty           = false;
 
 // UI state
-let pickerSlot = null, pickerFilter = 'ALL', playersFilter = 'ALL';
+let pickerSlot = null, pickerFilter = 'ALL', pickerTierFilter = 'ALL', pickerPriceFilter = 'ALL', playersFilter = 'ALL', playersTierFilter = 'ALL', playersPriceFilter = 'ALL';
 
 // ===== MARKET LOCK =====
 function isMarketLocked(md){
@@ -787,7 +787,7 @@ function calcMyPts(){
 function openPicker(slotId,slotLabel){
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
   if(isMarketLocked(curMD)){toast('Market is closed — changes not allowed');return;}
-  pickerSlot=slotId; pickerFilter='ALL';
+  pickerSlot=slotId; pickerFilter='ALL'; pickerTierFilter='ALL'; pickerPriceFilter='ALL';
   document.getElementById('pickerTitle').textContent='Pick '+slotLabel;
   document.getElementById('pickerSearch').value='';
   document.querySelectorAll('#pickerModal .filter-btn').forEach((b,i)=>b.classList.toggle('on',i===0));
@@ -795,7 +795,16 @@ function openPicker(slotId,slotLabel){
   renderPicker();
 }
 function closePicker(){ document.getElementById('pickerModal').classList.remove('open'); pickerSlot=null; }
-function setFilter(f,el){ pickerFilter=f; document.querySelectorAll('#pickerModal .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
+function setFilter(f,el){ pickerFilter=f; document.querySelectorAll('#picker-role-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
+function setPickerTierFilter(f,el){ pickerTierFilter=f; document.querySelectorAll('#picker-tier-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
+function setPickerPriceFilter(f,el){ pickerPriceFilter=f; document.querySelectorAll('#picker-price-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
+
+function teamLimitForMD(){
+  const mdNum=MATCHDAYS.find(m=>m.id===currentMDId)?.matchday_number??1;
+  if(mdNum>=7) return Infinity;
+  if(mdNum>=6) return 3;
+  return 2;
+}
 
 function renderPicker(){
   const q=document.getElementById('pickerSearch').value.toLowerCase();
@@ -805,16 +814,19 @@ function renderPicker(){
   const selectedIds=Object.values(myRosters).filter(Boolean).map(p=>p.id);
   const teamCount={};
   selectedIds.forEach(pid=>{ const p=PLAYERS.find(pl=>pl.id===pid); if(p) teamCount[p.vct_team]=(teamCount[p.vct_team]||0)+1; });
+  const limit=teamLimitForMD();
   const list=PLAYERS.filter(p=>{
     if(q&&!p.name.toLowerCase().includes(q)&&!p.vct_team.toLowerCase().includes(q)) return false;
     if(pickerFilter!=='ALL'&&p.role!==pickerFilter) return false;
+    if(pickerTierFilter!=='ALL'&&p.tier!==pickerTierFilter) return false;
+    if(pickerPriceFilter!=='ALL'&&p.price>Number(pickerPriceFilter)) return false;
     return true;
   });
   if(!list.length){ document.getElementById('pickerBody').innerHTML='<div style="color:var(--muted);text-align:center;padding:32px;font-size:13px">No players found</div>'; return; }
   document.getElementById('pickerBody').innerHTML=list.map(p=>{
     const alreadyIn=selectedIds.includes(p.id)&&myRosters[pickerSlot]?.id!==p.id;
     const roleOk=isAnySlot||allowedRoles.includes(p.role);
-    const teamFull=(teamCount[p.vct_team]||0)>=2&&!selectedIds.includes(p.id);
+    const teamFull=(teamCount[p.vct_team]||0)>=limit&&!selectedIds.includes(p.id);
     const disabled=alreadyIn||!roleOk||teamFull;
     return`<div class="player-row">
       <div><div class="pr-name">${p.name}</div><div class="pr-vctt">${p.vct_team}</div></div>
@@ -980,29 +992,37 @@ async function deleteMyTeam(){
 function resetTeamToSaved(){ discardDraft(); }
 
 // ===== PLAYERS PAGE =====
-function setPlayersFilter(f,el){ playersFilter=f; document.querySelectorAll('#page-players .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPlayersPage(); }
+const ELIMINATED_TEAMS = new Set(['Dragon Ranger Gaming','FULL SENSE','Global Esports','NRG']);
+
+function setPlayersFilter(f,el){ playersFilter=f; document.querySelectorAll('#role-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPlayersPage(); }
+function setPlayersTierFilter(f,el){ playersTierFilter=f; document.querySelectorAll('#tier-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPlayersPage(); }
+function setPlayersPriceFilter(f,el){ playersPriceFilter=f; document.querySelectorAll('#price-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPlayersPage(); }
 
 function renderPlayersPage(){
   const q=document.getElementById('playersSearch').value.toLowerCase();
   const list=PLAYERS.filter(p=>{
     if(q&&!p.name.toLowerCase().includes(q)&&!p.vct_team.toLowerCase().includes(q)) return false;
-    if(playersFilter==='ALL') return true;
-    if(['S','A','B','C'].includes(playersFilter)) return p.tier===playersFilter;
-    return p.role===playersFilter;
+    if(playersFilter!=='ALL'&&p.role!==playersFilter) return false;
+    if(playersTierFilter!=='ALL'&&p.tier!==playersTierFilter) return false;
+    if(playersPriceFilter!=='ALL'&&p.price>Number(playersPriceFilter)) return false;
+    return true;
   });
   const el=document.getElementById('playersGrid');
   if(!list.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:32px 0">No players found</div>';return;}
   const roleColor={Duelist:'#f87171',Initiator:'#60a5fa',Controller:'#a78bfa',Sentinel:'#34d399'};
   el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:10px">
-  ${list.map(p=>`<div class="card" style="padding:14px">
-    <div style="font-size:9px;letter-spacing:1px;color:${roleColor[p.role]||'#9ca3af'}">${p.role}</div>
+  ${list.map(p=>{
+    const elim=ELIMINATED_TEAMS.has(p.vct_team);
+    return`<div class="card" style="padding:14px;${elim?'opacity:0.35;filter:grayscale(1)':''}">
+    <div style="font-size:9px;letter-spacing:1px;color:${elim?'var(--muted)':roleColor[p.role]||'#9ca3af'}">${p.role}</div>
     <div style="font-size:15px;font-weight:700;margin-top:2px">${p.name}</div>
-    <div style="font-size:11px;color:var(--muted);margin-top:2px">${p.vct_team}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:2px">${p.vct_team}${elim?' · <span style="color:#ef4444;font-size:9px;letter-spacing:1px">OUT</span>':''}</div>
     <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:10px">
       <span class="tag tag-${p.tier}">${p.tier}</span>
-      <span style="font-size:12px;color:var(--accent)">${p.price}M</span>
+      <span style="font-size:12px;color:${elim?'var(--muted)':'var(--accent)'}">${p.price}M</span>
     </div>
-  </div>`).join('')}
+  </div>`;
+  }).join('')}
   </div>`;
 }
 
@@ -1153,15 +1173,16 @@ async function clearDeadline(mdId){
 }
 
 // ── Price Change Formula ─────────────────────────────────────────
-// >23→+1.5M | 18-23→+1M | 13-17→+0.5M | 6-12→0
-// 3-5→-0.5M | 0-2→-1M | <0→-1.5M
+// Based on player's total raw_pts across all matches in a matchday
+// > 23 → +1.5M | 18-23 → +1M | 13-17 → +0.5M | 6-12 → 0
+// 3-5 → -0.5M | 1-2 → -1M | < 1 → -1.5M | Max 30M · Min 4M
 function priceChangeDelta(score){
   if(score > 23)  return  1.5;
   if(score >= 18) return  1.0;
   if(score >= 13) return  0.5;
   if(score >= 6)  return  0.0;
   if(score >= 3)  return -0.5;
-  if(score >= 0)  return -1.0;
+  if(score >= 1)  return -1.0;
   return -1.5;
 }
 
@@ -1285,7 +1306,7 @@ async function scoreFixture(fxId, mdId){
     });
     const data=await res.json();
     if(data.ok){
-      if(fx){fx.status='completed';fx.vlr_match_url=url;}
+      if(fx){fx.status='completed';fx.vlr_match_url=url;fx.result_a=data.result_a;fx.result_b=data.result_b;}
       renderAdminMatchdays();
       renderLB();
       toast(`Scored ✓ — ${data.teamsScored} teams updated`);
@@ -1475,11 +1496,6 @@ function setPredScore(fxId, scoreA, scoreB){
 function togglePredDouble(fxId, mdId){
   const btn=document.getElementById('dbl_'+fxId); if(!btn) return;
   const isActive=btn.dataset.active==='true';
-  // Clear x2 from all other fixtures in this MD
-  FIXTURES.filter(f=>f.matchday_id===mdId&&f.id!==fxId).forEach(f=>{
-    const ob=document.getElementById('dbl_'+f.id);
-    if(ob){ ob.dataset.active='false'; ob.style.cssText=''; }
-  });
   btn.dataset.active=isActive?'false':'true';
   btn.style.cssText=!isActive?'background:rgba(255,185,0,0.15);border-color:rgba(255,185,0,0.4);color:var(--gold)':'';
 }
@@ -1493,16 +1509,18 @@ async function submitPrediction(fxId, mdId){
   if(isNaN(scoreA)||isNaN(scoreB)){ toast('Pick a score first'); return; }
   const isDoubled=document.getElementById('dbl_'+fxId)?.dataset.active==='true';
 
-  // Clear x2 from other predictions in this MD if doubling this one
-  if(isDoubled){
-    await sb.from('predictions').update({is_doubled:false})
-      .eq('team_id',myTeamId).eq('matchday_id',mdId).neq('fixture_id',fxId);
-  }
+  // Upsert first — if this fails, we haven't touched anyone else's double
   const {error}=await sb.from('predictions').upsert({
     team_id:myTeamId, fixture_id:fxId, matchday_id:mdId,
     tournament_id:TOURNAMENT.id, score_a:scoreA, score_b:scoreB, is_doubled:isDoubled,
   },{onConflict:'team_id,fixture_id'});
   if(error){ toast('Error saving prediction'); console.error(error); return; }
+
+  // Only after safe save: clear x2 from other predictions in this MD
+  if(isDoubled){
+    await sb.from('predictions').update({is_doubled:false})
+      .eq('team_id',myTeamId).eq('matchday_id',mdId).neq('fixture_id',fxId);
+  }
   toast('Prediction saved ✓');
   renderPredictPage();
 }

@@ -162,12 +162,26 @@
       <button class="modal-close" onclick="closePicker()">✕</button>
     </div>
     <div class="modal-search"><input id="pickerSearch" placeholder="Search by name or team..." oninput="renderPicker()"></div>
-    <div class="modal-filters">
+    <div id="picker-role-filters" class="modal-filters" style="margin-bottom:6px">
       <button class="filter-btn on" onclick="setFilter('ALL',this)">All</button>
       <button class="filter-btn" onclick="setFilter('Duelist',this)">Duelist</button>
       <button class="filter-btn" onclick="setFilter('Initiator',this)">Initiator</button>
       <button class="filter-btn" onclick="setFilter('Controller',this)">Controller</button>
       <button class="filter-btn" onclick="setFilter('Sentinel',this)">Sentinel</button>
+    </div>
+    <div id="picker-tier-filters" class="modal-filters" style="margin-bottom:6px">
+      <button class="filter-btn on" onclick="setPickerTierFilter('ALL',this)">All Grades</button>
+      <button class="filter-btn" onclick="setPickerTierFilter('S',this)">S</button>
+      <button class="filter-btn" onclick="setPickerTierFilter('A',this)">A</button>
+      <button class="filter-btn" onclick="setPickerTierFilter('B',this)">B</button>
+      <button class="filter-btn" onclick="setPickerTierFilter('C',this)">C</button>
+    </div>
+    <div id="picker-price-filters" class="modal-filters">
+      <button class="filter-btn on" onclick="setPickerPriceFilter('ALL',this)">All Prices</button>
+      <button class="filter-btn" onclick="setPickerPriceFilter('6',this)">≤6M</button>
+      <button class="filter-btn" onclick="setPickerPriceFilter('10',this)">≤10M</button>
+      <button class="filter-btn" onclick="setPickerPriceFilter('16',this)">≤16M</button>
+      <button class="filter-btn" onclick="setPickerPriceFilter('24',this)">≤24M</button>
     </div>
     <div class="modal-body" id="pickerBody"></div>
   </div>
@@ -248,16 +262,26 @@
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <input id="playersSearch" placeholder="Search players..." oninput="renderPlayersPage()" style="background:var(--s2);border:1px solid var(--border2);color:var(--text);padding:8px 12px;font-family:'Sarabun',sans-serif;font-size:14px;outline:none;flex:1;min-width:180px;max-width:280px;transition:.2s">
     </div>
-    <div class="modal-filters" style="margin-bottom:16px">
-      <button class="filter-btn on" onclick="setPlayersFilter('ALL',this)">All</button>
+    <div id="role-filters" class="modal-filters" style="margin-bottom:8px">
+      <button class="filter-btn on" onclick="setPlayersFilter('ALL',this)">All Roles</button>
       <button class="filter-btn" onclick="setPlayersFilter('Duelist',this)">Duelist</button>
       <button class="filter-btn" onclick="setPlayersFilter('Initiator',this)">Initiator</button>
       <button class="filter-btn" onclick="setPlayersFilter('Controller',this)">Controller</button>
       <button class="filter-btn" onclick="setPlayersFilter('Sentinel',this)">Sentinel</button>
-      <button class="filter-btn" onclick="setPlayersFilter('S',this)">Tier S</button>
-      <button class="filter-btn" onclick="setPlayersFilter('A',this)">Tier A</button>
-      <button class="filter-btn" onclick="setPlayersFilter('B',this)">Tier B</button>
-      <button class="filter-btn" onclick="setPlayersFilter('C',this)">Tier C</button>
+    </div>
+    <div id="tier-filters" class="modal-filters" style="margin-bottom:8px">
+      <button class="filter-btn on" onclick="setPlayersTierFilter('ALL',this)">All Grades</button>
+      <button class="filter-btn" onclick="setPlayersTierFilter('S',this)">S</button>
+      <button class="filter-btn" onclick="setPlayersTierFilter('A',this)">A</button>
+      <button class="filter-btn" onclick="setPlayersTierFilter('B',this)">B</button>
+      <button class="filter-btn" onclick="setPlayersTierFilter('C',this)">C</button>
+    </div>
+    <div id="price-filters" class="modal-filters" style="margin-bottom:16px">
+      <button class="filter-btn on" onclick="setPlayersPriceFilter('ALL',this)">All Prices</button>
+      <button class="filter-btn" onclick="setPlayersPriceFilter('6',this)">≤6M</button>
+      <button class="filter-btn" onclick="setPlayersPriceFilter('10',this)">≤10M</button>
+      <button class="filter-btn" onclick="setPlayersPriceFilter('16',this)">≤16M</button>
+      <button class="filter-btn" onclick="setPlayersPriceFilter('24',this)">≤24M</button>
     </div>
     <div id="playersGrid"></div>
   </div>

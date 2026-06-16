@@ -711,6 +711,10 @@ function renderCaptainList(){
   const el=document.getElementById('captainList');
   const filled=SLOTS.map(sl=>myRosters[sl.id]).filter(Boolean);
   if(!filled.length){el.innerHTML='<div style="font-size:11px;color:var(--muted)">Pick players first</div>';return;}
+  if(myChip==='topfragger'){
+    el.innerHTML='<div style="padding:10px;background:var(--s2);border:1px solid rgba(255,185,0,0.3);border-radius:4px;font-size:12px;color:var(--gold);text-align:center">🎯 Captain auto-assigned after matchday<br><span style="color:var(--muted);font-size:10px">Highest Rating player gets ×2</span></div>';
+    return;
+  }
   el.innerHTML=filled.map(p=>{
     const isCap=myCaptainId===p.id, isCap2=myCaptain2Id===p.id;
     return`<div style="padding:7px 10px;background:var(--s2);border:1px solid ${isCap||isCap2?'var(--gold)':'var(--border2)'};margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:.2s;border-radius:4px" onclick="setCaptain(${p.id})">
@@ -723,6 +727,7 @@ function renderCaptainList(){
 async function setCaptain(pid){
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
   if(isMarketLocked(curMD)){toast('Market is closed');return;}
+  if(myChip==='topfragger'){toast('Top Fragger auto-picks captain — remove chip to set manually');return;}
   if(myChip==='clonecap'){
     if(myCaptainId===pid) myCaptainId=null;
     else if(myCaptain2Id===pid) myCaptain2Id=null;
@@ -757,7 +762,13 @@ async function selectChip(id){
     await sb.from('active_chips').upsert({team_id:myTeamId,matchday_id:currentMDId,chip_name:newChip},{onConflict:'team_id,matchday_id'});
   }
   myChip=newChip;
-  if(myChip!=='clonecap'){ myCaptain2Id=null; await sb.from('teams').update({captain2_id:null}).eq('id',myTeamId); }
+  if(myChip==='topfragger'){
+    // Captain auto-assigned after matchday — clear stored captain
+    myCaptainId=null; myCaptain2Id=null;
+    await sb.from('teams').update({captain_id:null,captain2_id:null}).eq('id',myTeamId);
+  } else if(myChip!=='clonecap'){
+    myCaptain2Id=null; await sb.from('teams').update({captain2_id:null}).eq('id',myTeamId);
+  }
   renderChipList(); renderCaptainList(); calcMyPts();
 }
 

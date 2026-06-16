@@ -480,7 +480,8 @@ Deno.serve(async (req) => {
 
         const isCaptain = team.captainId === playerId;
         const isCaptain2 = team.captain2Id === playerId;
-        const isAnyCaptain = isCaptain || isCaptain2;
+        // topfragger: captain auto-assigned after matchday via rating — no captain bonus in regular scoring
+        const isAnyCaptain = team.chip !== "topfragger" && (isCaptain || isCaptain2);
 
         let effectiveChip = team.chip;
         if (team.chip === "topfragger") effectiveChip = null; // handled separately
@@ -546,45 +547,43 @@ Deno.serve(async (req) => {
       await sb.from("score_logs").insert(scoreLogs);
     }
 
-    // Post-process topfragger chip: find the single top scorer across the ENTIRE matchday
-    // (all matches combined) and give only them ×2, stacking with captain ×2 → ×4.
+    // Post-process topfragger chip: auto-assign captain to squad player with highest Rating 2.0
+    // across all matches in the matchday — that player gets ×2.
     for (const [teamId, team] of Object.entries(teamMap)) {
       if (team.chip !== "topfragger") continue;
 
       const { data: mdLogs } = await sb
         .from("score_logs")
-        .select("id, player_id, raw_pts, is_captain")
+        .select("id, player_id, raw_pts, rating_2_0")
         .eq("team_id", teamId)
         .eq("matchday_id", matchday_id);
 
       if (!mdLogs || !mdLogs.length) continue;
 
-      // Reset all rows to captain-only final_pts (clears any previous run's topfragger boost)
+      // Reset all final_pts to raw_pts (no captain bonus — auto-captain applied below)
       for (const log of mdLogs) {
-        const captMult = log.is_captain ? 2 : 1;
-        await sb.from("score_logs").update({ final_pts: log.raw_pts * captMult }).eq("id", log.id);
+        await sb.from("score_logs").update({ final_pts: log.raw_pts }).eq("id", log.id);
       }
 
-      // Sum raw_pts per player across all matches in the matchday
-      const playerTotals: Record<number, number> = {};
+      // Find player with highest rating_2_0 across all their match rows
+      const playerMaxRating: Record<number, number> = {};
       for (const log of mdLogs) {
-        playerTotals[log.player_id] = (playerTotals[log.player_id] ?? 0) + log.raw_pts;
+        const r = log.rating_2_0 ?? 0;
+        if (r > (playerMaxRating[log.player_id] ?? -Infinity)) playerMaxRating[log.player_id] = r;
       }
 
-      // Find the top fragger
-      let topPts = -Infinity, topPlayerId = -1;
-      for (const [pid, pts] of Object.entries(playerTotals)) {
-        if (pts > topPts) { topPts = pts; topPlayerId = Number(pid); }
+      let topRating = -Infinity, topPlayerId = -1;
+      for (const [pid, r] of Object.entries(playerMaxRating)) {
+        if (r > topRating) { topRating = r; topPlayerId = Number(pid); }
       }
       if (topPlayerId === -1) continue;
 
-      // Apply ×2 to every score_log row for the top fragger (stacks with captain)
+      // Apply ×2 to the auto-captain's rows
       for (const log of mdLogs.filter(l => l.player_id === topPlayerId)) {
-        const captMult = log.is_captain ? 2 : 1;
-        await sb.from("score_logs").update({ final_pts: log.raw_pts * captMult * 2 }).eq("id", log.id);
+        await sb.from("score_logs").update({ final_pts: log.raw_pts * 2 }).eq("id", log.id);
       }
 
-      console.log(`  [topfragger] Team ${teamId}: boost → player_id=${topPlayerId} totalRaw=${topPts}`);
+      console.log(`  [topfragger] Team ${teamId}: auto-captain = player_id=${topPlayerId} rating=${topRating}`);
     }
 
     // Recalculate matchday_scores by summing ALL score_logs for this matchday per team.

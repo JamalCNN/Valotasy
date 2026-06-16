@@ -521,9 +521,13 @@ async function expandTeam(expId, teamId){
       slotMap[l.slot].pts+=(l.final_pts||0);
       slotMap[l.slot].raw+=(l.raw_pts||0);
     }
-    // Detect top fragger: topfragger chip team + final_pts > raw_pts (got the ×2)
+    // Detect top fragger: if ANY log for this team has chip_used='topfragger',
+    // the player whose aggregated pts > raw is the auto-captain (got ×2).
+    const teamUsesTopfragger=logs.some(l=>l.chip_used==='topfragger');
     const tfPlayerIds=new Set(
-      Object.values(slotMap).filter(s=>s.chip_used==='topfragger'&&s.pts>s.raw).map(s=>s.player_id)
+      teamUsesTopfragger
+        ? Object.values(slotMap).filter(s=>s.pts>s.raw&&!s.is_captain).map(s=>s.player_id)
+        : []
     );
     // Fetch role/vct_team for display
     const playerIds=[...new Set(Object.values(slotMap).map(s=>s.player_id).filter(Boolean))];

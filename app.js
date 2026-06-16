@@ -107,6 +107,7 @@ let myBudgetAdj    = 0;  // kept for compat — actual budget uses calcDraftBudg
 let myCaptainId    = null;
 let myCaptain2Id   = null;
 let myChip         = null;
+let myUsedChips    = new Set(); // chips spent in previous matchdays
 let myTransferCount = 0;
 let mySlotScores   = {}; // {playerId: finalPts} for current MD
 
@@ -173,7 +174,7 @@ async function loadMyTeam(){
       .insert({user_id:currentUser.userId,tournament_id:TOURNAMENT.id,team_name:currentUser.manager+"'s Team"})
       .select('id,team_name').single();
     if(newTeam){ myTeamId=newTeam.id; myTeamName=newTeam.team_name; }
-    myCaptainId=null; myCaptain2Id=null; myChip=null; myRosters={}; myBuyPrices={}; myBudgetAdj=0; myTransferCount=0;
+    myCaptainId=null; myCaptain2Id=null; myChip=null; myUsedChips=new Set(); myRosters={}; myBuyPrices={}; myBudgetAdj=0; myTransferCount=0;
     return;
   }
   myTeamId     = team.id;
@@ -182,6 +183,7 @@ async function loadMyTeam(){
   myCaptain2Id = team.captain2_id;
   const chipRow = (team.active_chips||[]).find(c=>c.matchday_id===currentMDId);
   myChip = chipRow?.chip_name||null;
+  myUsedChips = new Set((team.active_chips||[]).filter(c=>c.matchday_id!==currentMDId).map(c=>c.chip_name));
   myBudgetAdj = team.budget_adjustment ?? 0;
   myRosters = {}; myBuyPrices = {};
   for(const r of (team.rosters||[])){
@@ -735,10 +737,11 @@ async function setCaptain(pid){
 function renderChipList(){
   document.getElementById('chipList').innerHTML=CHIPS.map(c=>{
     const isSelected=myChip===c.id;
-    return`<div class="chip-item ${isSelected?'selected':''}" onclick="selectChip('${c.id}')">
+    const isUsed=myUsedChips.has(c.id);
+    return`<div class="chip-item ${isSelected?'selected':''}" onclick="selectChip('${c.id}')" style="${isUsed?'opacity:0.4;pointer-events:none;filter:grayscale(1)':''}">
       <div class="chip-icon">${c.icon}</div>
       <div class="chip-info"><div class="chip-nm">${c.name}</div><div class="chip-desc">${c.desc}</div></div>
-      ${isSelected?'<div style="font-size:9px;color:var(--gold)">ON</div>':''}
+      ${isSelected?'<div style="font-size:9px;color:var(--gold)">ON</div>':isUsed?'<div style="font-size:9px;color:var(--muted)">USED</div>':''}
     </div>`;
   }).join('');
 }
@@ -746,6 +749,7 @@ function renderChipList(){
 async function selectChip(id){
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
   if(isMarketLocked(curMD)){toast('Market is closed');return;}
+  if(myUsedChips.has(id)){toast('Chip already used in a previous matchday');return;}
   const newChip=myChip===id?null:id;
   if(newChip===null){
     await sb.from('active_chips').delete().eq('team_id',myTeamId).eq('matchday_id',currentMDId);

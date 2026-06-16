@@ -490,7 +490,7 @@ async function expandTeam(expId, teamId){
   // score_logs records exactly which players were in which slots when matches were scored,
   // so it correctly shows the squad AS IT WAS during that matchday, not the current roster.
   const {data:logs} = await sb.from('score_logs')
-    .select('player_id,player_name,slot,is_captain,final_pts')
+    .select('player_id,player_name,slot,is_captain,final_pts,raw_pts,chip_used')
     .eq('team_id',teamId).eq('matchday_id',lbMDId);
 
   const chips = document.createElement('div'); chips.className='player-chips';
@@ -517,9 +517,14 @@ async function expandTeam(expId, teamId){
     // Aggregate multiple matches within the same matchday per slot
     const slotMap={};
     for(const l of logs){
-      if(!slotMap[l.slot]) slotMap[l.slot]={player_id:l.player_id,player_name:l.player_name,is_captain:l.is_captain,pts:0};
+      if(!slotMap[l.slot]) slotMap[l.slot]={player_id:l.player_id,player_name:l.player_name,is_captain:l.is_captain,chip_used:l.chip_used,pts:0,raw:0};
       slotMap[l.slot].pts+=(l.final_pts||0);
+      slotMap[l.slot].raw+=(l.raw_pts||0);
     }
+    // Detect top fragger: topfragger chip team + final_pts > raw_pts (got the ×2)
+    const tfPlayerIds=new Set(
+      Object.values(slotMap).filter(s=>s.chip_used==='topfragger'&&s.pts>s.raw).map(s=>s.player_id)
+    );
     // Fetch role/vct_team for display
     const playerIds=[...new Set(Object.values(slotMap).map(s=>s.player_id).filter(Boolean))];
     const {data:playerList}=playerIds.length?await sb.from('players').select('id,role,vct_team').in('id',playerIds):{data:[]};
@@ -529,8 +534,10 @@ async function expandTeam(expId, teamId){
     for(const sl of SLOTS){
       const entry=slotMap[sl.id]; if(!entry) continue;
       const meta=playerMeta[entry.player_id]||{};
-      chips.innerHTML+=`<div class="pc ${entry.is_captain?'cap':''}">
-        <div class="pc-role">${meta.role||sl.label}</div><div class="pc-name">${entry.player_name}</div>
+      const isTF=tfPlayerIds.has(entry.player_id);
+      chips.innerHTML+=`<div class="pc ${entry.is_captain?'cap':''}" style="${isTF?'border-color:rgba(255,185,0,0.5);background:rgba(255,185,0,0.07)':''}">
+        <div class="pc-role">${meta.role||sl.label}</div>
+        <div class="pc-name">${entry.player_name}${isTF?' <span style="font-size:9px;color:var(--gold);letter-spacing:1px">🎯TF</span>':''}</div>
         <div class="pc-team">${meta.vct_team||''}</div><div class="pc-pts">${entry.pts} pts</div></div>`;
     }
   }

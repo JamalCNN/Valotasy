@@ -602,10 +602,11 @@ function renderTransferInfo(curMD, locked){
     tlEl.innerHTML=`Transfers this MD: <span style="color:#4ade80">${used}</span> &nbsp;<span style="color:#4ade80">🃏 Wildcard — no penalty</span>`;
     document.getElementById('penaltyPts').textContent='-0 pts';
   } else {
-    const extra=Math.max(0,used-2);
+    const free=freeTransfersForMD();
+    const extra=Math.max(0,used-free);
     const penStr=extra>0?` &nbsp;<span style="color:var(--red)">+${extra} over (-${extra*penalty}pts)</span>`:'';
-    tlEl.innerHTML=`Transfers this MD: <span style="color:${used>2?'var(--red)':'var(--text)'}">${used}</span>/2${penStr}`;
-    document.getElementById('penaltyPts').textContent=`-${Math.max(0,used-2)*penalty} pts`;
+    tlEl.innerHTML=`Transfers this MD: <span style="color:${used>free?'var(--red)':'var(--text)'}">${used}</span>/${free}${penStr}`;
+    document.getElementById('penaltyPts').textContent=`-${Math.max(0,used-free)*penalty} pts`;
   }
 }
 
@@ -803,7 +804,7 @@ function calcMyPts(){
   const isMD1 = MATCHDAYS[0]?.id === currentMDId;
   const isWildcard = myChip === 'wildcard';
   if(!isMD1 && !isWildcard){
-    const extra = Math.max(0, calcDraftTransfers() - 2);
+    const extra = Math.max(0, calcDraftTransfers() - freeTransfersForMD());
     total -= extra * (TOURNAMENT?.transfer_penalty || 8);
   }
   document.getElementById('myTotalPts').textContent = total;
@@ -828,6 +829,12 @@ function setPickerPriceFilter(f,el){ pickerPriceFilter=f; document.querySelector
 function teamLimitForMD(){
   const mdNum=MATCHDAYS.find(m=>m.id===currentMDId)?.matchday_number??1;
   if(mdNum>=7) return Infinity;
+  if(mdNum>=6) return 3;
+  return 2;
+}
+function freeTransfersForMD(){
+  const mdNum=MATCHDAYS.find(m=>m.id===currentMDId)?.matchday_number??1;
+  if(mdNum>=7) return 4;
   if(mdNum>=6) return 3;
   return 2;
 }
@@ -919,7 +926,7 @@ async function confirmTeam(){
       if(!curr||savedIds.has(curr.id)) continue;
       transfers.push({team_id:myTeamId,matchday_id:currentMDId,slot:sl,
         old_player_id:savedRosters[sl]?.id||null,new_player_id:curr.id,
-        penalty_applied:txCount>=2});
+        penalty_applied:txCount>=freeTransfersForMD()});
       txCount++;
     }
   }
@@ -984,8 +991,9 @@ function renderChangesPanel(){
 
   const draftTx=calcDraftTransfers();
   const penalty=TOURNAMENT?.transfer_penalty||8;
-  const extra=(!isMD1&&!isWildcard)?Math.max(0,draftTx-2):0;
-  const txStr=isMD1?'MD1 — free':`${draftTx}/2${extra>0?` <span style="color:var(--red)">+${extra} penalty (-${extra*penalty}pts)</span>`:''}`;
+  const freeTx=freeTransfersForMD();
+  const extra=(!isMD1&&!isWildcard)?Math.max(0,draftTx-freeTx):0;
+  const txStr=isMD1?'MD1 — free':`${draftTx}/${freeTx}${extra>0?` <span style="color:var(--red)">+${extra} penalty (-${extra*penalty}pts)</span>`:''}`;
 
   el.style.display='block';
   el.innerHTML=`<div style="background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.15);border-radius:6px;padding:12px 16px;margin-bottom:10px">

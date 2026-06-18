@@ -104,6 +104,7 @@ let myTeamName     = '';
 let myRosters      = {}; // {slot: playerRow}   ← draft
 let myBuyPrices    = {}; // {slot: price_paid}   ← draft
 let myBudgetAdj    = 0;  // kept for compat — actual budget uses calcDraftBudgetAdj()
+let myAdminBudgetAdj = 0;
 let myCaptainId    = null;
 let myCaptain2Id   = null;
 let myChip         = null;
@@ -167,7 +168,7 @@ async function seedPlayers(){
 async function loadMyTeam(){
   if(!currentUser||!TOURNAMENT) return;
   const {data:team} = await sb.from('teams')
-    .select('id,team_name,captain_id,captain2_id,total_points,budget_adjustment,rosters(slot,player_id,buy_price,players(*)),active_chips(chip_name,matchday_id)')
+    .select('id,team_name,captain_id,captain2_id,total_points,budget_adjustment,admin_budget_adj,rosters(slot,player_id,buy_price,players(*)),active_chips(chip_name,matchday_id)')
     .eq('user_id',currentUser.userId).eq('tournament_id',TOURNAMENT.id).single();
   if(!team){
     const {data:newTeam} = await sb.from('teams')
@@ -185,6 +186,7 @@ async function loadMyTeam(){
   myChip = chipRow?.chip_name||null;
   myUsedChips = new Set((team.active_chips||[]).filter(c=>c.matchday_id!==currentMDId).map(c=>c.chip_name));
   myBudgetAdj = team.budget_adjustment ?? 0;
+  myAdminBudgetAdj = team.admin_budget_adj ?? 0;
   myRosters = {}; myBuyPrices = {};
   for(const r of (team.rosters||[])){
     if(r.players){ myRosters[r.slot]=r.players; myBuyPrices[r.slot]=r.buy_price??r.players.price; }
@@ -304,7 +306,7 @@ function calcDraftTransfers(){
 function getDraftBudget(){
   const budget=TOURNAMENT?.budget||100;
   const used=Object.values(myBuyPrices).reduce((s,v)=>s+(v||0),0);
-  return budget-used+calcDraftBudgetAdj();
+  return budget-used+calcDraftBudgetAdj()+myAdminBudgetAdj;
 }
 
 // ===== PAGE NAV =====
@@ -1669,20 +1671,45 @@ async function saveSettings(){
 function renderTeamListAdmin(){
   const el=document.getElementById('teamListAdmin');
   const cEl=document.getElementById('teamCount');
-  sb.from('teams').select('id,team_name,total_points,users!inner(manager_name)').eq('tournament_id',TOURNAMENT.id).order('total_points',{ascending:false})
+  sb.from('teams').select('id,team_name,total_points,admin_budget_adj,users!inner(manager_name)').eq('tournament_id',TOURNAMENT.id).order('total_points',{ascending:false})
     .then(({data:teams})=>{
       if(cEl) cEl.textContent=teams?.length||0;
       if(!el) return;
       if(!teams?.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">No teams yet</div>';return;}
-      el.innerHTML=teams.map(t=>`
-        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--border2)">
-          <div>
-            <div style="font-size:13px;font-weight:600">${t.team_name}</div>
-            <div style="font-size:11px;color:var(--muted)">👤 ${t.users?.manager_name||'—'} &nbsp;·&nbsp; ⭐ ${t.total_points||0} pts</div>
+      el.innerHTML=teams.map(t=>{
+        const adj=t.admin_budget_adj||0;
+        const adjLabel=adj>0?`<span style="color:#4ade80">+${adj}M</span>`:adj<0?`<span style="color:var(--red)">${adj}M</span>`:'';
+        return`<div style="padding:10px 0;border-bottom:0.5px solid var(--border2)">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:13px;font-weight:600">${t.team_name}</div>
+              <div style="font-size:11px;color:var(--muted)">👤 ${t.users?.manager_name||'—'} &nbsp;·&nbsp; ⭐ ${t.total_points||0} pts${adjLabel?' &nbsp;·&nbsp; 💰 '+adjLabel:''}
+              </div>
+            </div>
+            <button onclick="deleteTeamAdmin('${t.id}')" class="btn-sm btn-del">🗑</button>
           </div>
-          <button onclick="deleteTeamAdmin('${t.id}')" class="btn-sm btn-del">🗑 Delete</button>
-        </div>`).join('');
+          <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
+            <input id="badj_${t.id}" type="number" placeholder="Amount (M)" style="background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:4px 8px;font-size:11px;border-radius:3px;width:110px;outline:none">
+            <button onclick="adminAdjustBudget('${t.id}',1)" class="btn-sm btn-edit" style="font-size:10px;padding:4px 8px">+ Add</button>
+            <button onclick="adminAdjustBudget('${t.id}',-1)" class="btn-sm btn-del" style="font-size:10px;padding:4px 8px">− Remove</button>
+          </div>
+        </div>`;
+      }).join('');
     });
+}
+
+async function adminAdjustBudget(teamId, sign){
+  const input=document.getElementById('badj_'+teamId);
+  const amount=parseFloat(input?.value);
+  if(!amount||amount<=0){toast('Enter a valid amount');return;}
+  const {data:t}=await sb.from('teams').select('admin_budget_adj').eq('id',teamId).single();
+  const current=t?.admin_budget_adj||0;
+  const newAdj=Math.round((current+sign*amount)*10)/10;
+  await sb.from('teams').update({admin_budget_adj:newAdj}).eq('id',teamId);
+  if(input) input.value='';
+  if(teamId===myTeamId){myAdminBudgetAdj=newAdj;calcBudget();}
+  renderTeamListAdmin();
+  toast(`Budget ${sign>0?'added':'removed'}: ${amount}M ✓`);
 }
 
 async function deleteTeamAdmin(teamId){

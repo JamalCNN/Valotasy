@@ -1106,6 +1106,7 @@ function renderAdminMatchdays(){
       </div>`;
     }).join('') : `<div style="font-size:11px;color:var(--muted);padding:6px 0">No fixtures yet</div>`;
 
+    const allFixturesDone=mdFixtures.length>0&&mdFixtures.every(f=>f.status==='completed');
     return `
     <div style="padding:12px 0;border-bottom:0.5px solid var(--border2)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
@@ -1115,6 +1116,7 @@ function renderAdminMatchdays(){
         ${md.scores_locked?`<span style="font-size:9px;padding:2px 6px;border-radius:2px;background:rgba(250,204,21,0.12);color:#facc15">📊 SCORES FINAL</span>`:''}
         <button onclick="setMarket(${md.id},${!md.market_open})" class="btn-sm ${md.market_open?'btn-del':'btn-edit'}" style="margin-left:auto">${md.market_open?'🔒 Lock':'🔓 Open'}</button>
         <button onclick="lockMatchdayScores(${md.id},${!md.scores_locked})" class="btn-sm" style="font-size:9px;background:${md.scores_locked?'rgba(250,204,21,0.1)':'rgba(255,255,255,0.06)'};border:0.5px solid ${md.scores_locked?'rgba(250,204,21,0.3)':'var(--border2)'};color:${md.scores_locked?'#facc15':'var(--muted)'}">${md.scores_locked?'🔓 Unlock Scores':'📊 Lock Scores'}</button>
+        <button onclick="finalizeMatchday(${md.id})" class="btn-sm" style="font-size:9px;background:rgba(255,185,0,0.1);border:0.5px solid rgba(255,185,0,0.3);color:var(--gold);${allFixturesDone?'':'opacity:0.35;pointer-events:none'}" ${allFixturesDone?'':'disabled'}>🎯 Finalize TF</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:${dlDisplay?'4px':'8px'}">
         <span style="font-size:10px;font-weight:500;letter-spacing:0.5px;color:var(--muted);text-transform:uppercase;white-space:nowrap">⏰ Deadline</span>
@@ -1354,6 +1356,28 @@ async function scoreFixture(fxId, mdId){
   }
 }
 
+
+async function finalizeMatchday(mdId){
+  const mdFixtures=FIXTURES.filter(f=>f.matchday_id===mdId);
+  const allDone=mdFixtures.length>0&&mdFixtures.every(f=>f.status==='completed');
+  if(!allDone){toast('Score all fixtures first');return;}
+  if(!await showConfirm('Finalize Top Fragger','Apply ×2 to the highest-rated player for all teams using the 🎯 Top Fragger chip this matchday.','Finalize')) return;
+  toast('⏳ Calculating Top Fragger...');
+  try{
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/scrape-match`,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({action:'finalize',matchday_id:mdId,tournament_id:TOURNAMENT.id}),
+    });
+    const data=await res.json();
+    if(data.ok){
+      toast(`🎯 Top Fragger finalized ✓ — ${data.teamsFinalized} team(s) updated`);
+      renderLB();
+    } else {
+      toast('❌ '+(data.error||'Unknown error'));
+    }
+  } catch(e){ toast('Network error: '+e.message); }
+}
 
 async function resetPrices(){
   const {data:players}=await sb.from('players').select('id,price,previous_price').eq('tournament_id',TOURNAMENT.id).not('previous_price','is',null);

@@ -302,7 +302,71 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { match_url, matchday_id, tournament_id, fixture_id } = await req.json();
+    const body = await req.json();
+    const { action, match_url, matchday_id, tournament_id, fixture_id } = body;
+
+    // ── Finalize Top Fragger: run once after all matches in the matchday are scored ──
+    if (action === "finalize") {
+      if (!matchday_id || !tournament_id) return json({ error: "matchday_id and tournament_id required" }, 400);
+      const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+      const { data: tfChips } = await sb.from("active_chips")
+        .select("team_id").eq("matchday_id", matchday_id).eq("chip_name", "topfragger");
+
+      let teamsFinalized = 0;
+      for (const chip of (tfChips ?? [])) {
+        const teamId = chip.team_id;
+
+        const { data: mdLogs } = await sb.from("score_logs")
+          .select("id, player_id, raw_pts, rating_2_0")
+          .eq("team_id", teamId).eq("matchday_id", matchday_id);
+        if (!mdLogs?.length) continue;
+
+        // Reset all to raw_pts
+        for (const log of mdLogs) {
+          await sb.from("score_logs").update({ final_pts: log.raw_pts }).eq("id", log.id);
+        }
+
+        // Find player with highest Rating 2.0 (max across all their matches)
+        const playerMaxRating: Record<number, number> = {};
+        for (const log of mdLogs) {
+          const r = log.rating_2_0 ?? 0;
+          if (r > (playerMaxRating[log.player_id] ?? -Infinity)) playerMaxRating[log.player_id] = r;
+        }
+        let topRating = -Infinity, topPlayerId = -1;
+        for (const [pid, r] of Object.entries(playerMaxRating)) {
+          if (r > topRating) { topRating = r; topPlayerId = Number(pid); }
+        }
+        if (topPlayerId === -1) continue;
+
+        // Apply ×2 to all of that player's rows across the matchday
+        for (const log of mdLogs.filter(l => l.player_id === topPlayerId)) {
+          await sb.from("score_logs").update({ final_pts: log.raw_pts * 2 }).eq("id", log.id);
+        }
+
+        // Recalculate matchday_scores
+        const { data: allLogs } = await sb.from("score_logs").select("final_pts")
+          .eq("team_id", teamId).eq("matchday_id", matchday_id);
+        const { data: existingScore } = await sb.from("matchday_scores").select("penalty_points")
+          .eq("team_id", teamId).eq("matchday_id", matchday_id).single();
+        const penalty = existingScore?.penalty_points ?? 0;
+        const totalRaw = (allLogs ?? []).reduce((s: number, r: any) => s + (r.final_pts ?? 0), 0);
+        await sb.from("matchday_scores").upsert(
+          { team_id: teamId, matchday_id, raw_points: totalRaw, penalty_points: penalty, net_points: totalRaw - penalty },
+          { onConflict: "team_id,matchday_id" }
+        );
+
+        // Update total_points
+        const { data: allScores } = await sb.from("matchday_scores").select("net_points").eq("team_id", teamId);
+        const total = (allScores ?? []).reduce((s: number, r: any) => s + (r.net_points ?? 0), 0);
+        await sb.from("teams").update({ total_points: total }).eq("id", teamId);
+
+        console.log(`  [finalize] Team ${teamId}: top fragger player_id=${topPlayerId} rating=${topRating}`);
+        teamsFinalized++;
+      }
+      return json({ ok: true, teamsFinalized });
+    }
+
     if (!match_url || !matchday_id || !tournament_id) {
       return json({ error: "match_url, matchday_id, tournament_id are required" }, 400);
     }
@@ -545,45 +609,6 @@ Deno.serve(async (req) => {
     await sb.from("score_logs").delete().eq("match_id", matchId);
     if (scoreLogs.length) {
       await sb.from("score_logs").insert(scoreLogs);
-    }
-
-    // Post-process topfragger chip: find squad player with highest Rating 2.0 (max across matches),
-    // then ×2 all their raw_pts rows across the entire matchday.
-    for (const [teamId, team] of Object.entries(teamMap)) {
-      if (team.chip !== "topfragger") continue;
-
-      const { data: mdLogs } = await sb
-        .from("score_logs")
-        .select("id, player_id, raw_pts, rating_2_0")
-        .eq("team_id", teamId)
-        .eq("matchday_id", matchday_id);
-
-      if (!mdLogs || !mdLogs.length) continue;
-
-      // Reset all final_pts to raw_pts first
-      for (const log of mdLogs) {
-        await sb.from("score_logs").update({ final_pts: log.raw_pts }).eq("id", log.id);
-      }
-
-      // Find player with highest Rating 2.0 across all their match rows (take max per player)
-      const playerMaxRating: Record<number, number> = {};
-      for (const log of mdLogs) {
-        const r = log.rating_2_0 ?? 0;
-        if (r > (playerMaxRating[log.player_id] ?? -Infinity)) playerMaxRating[log.player_id] = r;
-      }
-
-      let topRating = -Infinity, topPlayerId = -1;
-      for (const [pid, r] of Object.entries(playerMaxRating)) {
-        if (r > topRating) { topRating = r; topPlayerId = Number(pid); }
-      }
-      if (topPlayerId === -1) continue;
-
-      // Apply ×2 to all of the top fragger's rows across the whole matchday
-      for (const log of mdLogs.filter(l => l.player_id === topPlayerId)) {
-        await sb.from("score_logs").update({ final_pts: log.raw_pts * 2 }).eq("id", log.id);
-      }
-
-      console.log(`  [topfragger] Team ${teamId}: top fragger = player_id=${topPlayerId} rating=${topRating}`);
     }
 
     // Recalculate matchday_scores by summing ALL score_logs for this matchday per team.

@@ -1097,8 +1097,10 @@ function renderAdminMatchdays(){
     const fixtureRows = mdFixtures.length ? mdFixtures.map(fx=>{
       const timeStr = fx.scheduled_time ? new Date(fx.scheduled_time).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : 'TBD';
       const done = fx.status==='completed';
+      const bo=fx.best_of||3;
       return `<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:0.5px solid rgba(255,255,255,0.04);flex-wrap:wrap">
         <span style="font-size:12px;font-weight:600;flex:1;min-width:140px">${fx.team_a} <span style="color:var(--muted);font-weight:400">vs</span> ${fx.team_b} <span style="color:var(--muted);font-size:10px">· ${timeStr}</span></span>
+        <span style="font-size:9px;padding:2px 6px;border-radius:2px;white-space:nowrap;background:${bo===5?'rgba(255,185,0,0.12)':'rgba(255,255,255,0.05)'};color:${bo===5?'var(--gold)':'var(--muted)'};font-weight:600">BO${bo}</span>
         <span style="font-size:9px;padding:2px 6px;border-radius:2px;white-space:nowrap;background:${done?'rgba(74,222,128,0.12)':'rgba(255,255,255,0.05)'};color:${done?'#4ade80':'var(--muted)'}">${done?'SCORED':'SCHEDULED'}</span>
         <input id="fx_url_${fx.id}" value="${fx.vlr_match_url||''}" placeholder="VLR.gg URL..." ${done?'disabled':''} style="background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:4px 8px;font-size:11px;outline:none;border-radius:3px;width:180px;${done?'opacity:0.4':''}">
         <button onclick="scoreFixture(${fx.id},${md.id})" class="btn-sm ${done||md.scores_locked?'':'btn-edit'}" ${done||md.scores_locked?'disabled':''} style="${done||md.scores_locked?'opacity:0.4':''}">⚡</button>
@@ -1136,6 +1138,7 @@ function renderAdminMatchdays(){
         <span style="color:var(--muted);font-size:11px;white-space:nowrap">vs</span>
         <input id="fx_b_${md.id}" placeholder="Team B" style="background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:5px 8px;font-size:12px;outline:none;border-radius:3px;flex:1;min-width:90px">
         <input readonly id="fx_t_${md.id}" placeholder="Date & time..." style="background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:5px 8px;font-size:12px;outline:none;border-radius:3px;flex:1;min-width:120px;cursor:pointer">
+        <button id="fx_bo_${md.id}" onclick="toggleFxBO(${md.id})" class="btn-sm" style="font-size:9px;font-weight:700;white-space:nowrap">BO3</button>
         <button onclick="addFixture(${md.id})" class="btn-sm btn-edit">+ Add</button>
       </div>
     </div>`;
@@ -1303,15 +1306,27 @@ async function updatePlayerPrices(mdId){
   toast(`💰 Updated ${updated} players${warn} — see console for details`);
 }
 
+function toggleFxBO(mdId){
+  const btn=document.getElementById('fx_bo_'+mdId);
+  if(!btn) return;
+  const isBO5=btn.textContent==='BO3';
+  btn.textContent=isBO5?'BO5':'BO3';
+  btn.style.background=isBO5?'rgba(255,185,0,0.15)':'';
+  btn.style.borderColor=isBO5?'rgba(255,185,0,0.4)':'';
+  btn.style.color=isBO5?'var(--gold)':'';
+}
+
 async function addFixture(mdId){
   const teamA=document.getElementById('fx_a_'+mdId)?.value.trim();
   const teamB=document.getElementById('fx_b_'+mdId)?.value.trim();
   if(!teamA||!teamB){toast('Enter both team names');return;}
   const timeInput=document.getElementById('fx_t_'+mdId);
   const scheduledTime=timeInput?._flatpickr?.latestSelectedDateObj?.toISOString()||null;
+  const boBtn=document.getElementById('fx_bo_'+mdId);
+  const bestOf=boBtn?.textContent==='BO5'?5:3;
   const {data,error}=await sb.from('fixtures').insert({
     matchday_id:mdId, tournament_id:TOURNAMENT.id,
-    team_a:teamA, team_b:teamB, scheduled_time:scheduledTime, status:'scheduled',
+    team_a:teamA, team_b:teamB, scheduled_time:scheduledTime, status:'scheduled', best_of:bestOf,
   }).select().single();
   if(error){toast('Error adding fixture');console.error(error);return;}
   FIXTURES.push(data);
@@ -1447,7 +1462,8 @@ async function renderPredictPage(){
   ).join('');
 
   // Fixture rows
-  const SCORE_OPTS=[{a:2,b:0},{a:2,b:1},{a:1,b:2},{a:0,b:2}];
+  const SCORE_OPTS_BO3=[{a:2,b:0},{a:2,b:1},{a:1,b:2},{a:0,b:2}];
+  const SCORE_OPTS_BO5=[{a:3,b:0},{a:3,b:1},{a:3,b:2},{a:2,b:3},{a:1,b:3},{a:0,b:3}];
   let fixturesHtml='';
   if(!mdFixtures.length){
     fixturesHtml='<div style="color:var(--muted);font-size:12px;padding:16px 0">No fixtures for this matchday</div>';
@@ -1480,7 +1496,8 @@ async function renderPredictPage(){
 
       // Prediction form
       const isDoubled=pred?.is_doubled||false;
-      const scoreBtns=SCORE_OPTS.map(s=>{
+      const scoreOpts=(fx.best_of===5)?SCORE_OPTS_BO5:SCORE_OPTS_BO3;
+      const scoreBtns=scoreOpts.map(s=>{
         const sel=pred&&pred.score_a===s.a&&pred.score_b===s.b;
         return `<button onclick="setPredScore(${fx.id},${s.a},${s.b})"
           data-pred-fix="${fx.id}" data-sa="${s.a}" data-sb="${s.b}"

@@ -547,14 +547,14 @@ Deno.serve(async (req) => {
       await sb.from("score_logs").insert(scoreLogs);
     }
 
-    // Post-process topfragger chip: auto-assign ×2 to squad player with highest total raw_pts
-    // across all matches in the matchday.
+    // Post-process topfragger chip: find squad player with highest Rating 2.0 (max across matches),
+    // then ×2 all their raw_pts rows across the entire matchday.
     for (const [teamId, team] of Object.entries(teamMap)) {
       if (team.chip !== "topfragger") continue;
 
       const { data: mdLogs } = await sb
         .from("score_logs")
-        .select("id, player_id, raw_pts")
+        .select("id, player_id, raw_pts, rating_2_0")
         .eq("team_id", teamId)
         .eq("matchday_id", matchday_id);
 
@@ -565,24 +565,25 @@ Deno.serve(async (req) => {
         await sb.from("score_logs").update({ final_pts: log.raw_pts }).eq("id", log.id);
       }
 
-      // Find player with highest total raw_pts across all their match rows
-      const playerTotalPts: Record<number, number> = {};
+      // Find player with highest Rating 2.0 across all their match rows (take max per player)
+      const playerMaxRating: Record<number, number> = {};
       for (const log of mdLogs) {
-        playerTotalPts[log.player_id] = (playerTotalPts[log.player_id] ?? 0) + (log.raw_pts ?? 0);
+        const r = log.rating_2_0 ?? 0;
+        if (r > (playerMaxRating[log.player_id] ?? -Infinity)) playerMaxRating[log.player_id] = r;
       }
 
-      let topPts = -Infinity, topPlayerId = -1;
-      for (const [pid, pts] of Object.entries(playerTotalPts)) {
-        if (pts > topPts) { topPts = pts; topPlayerId = Number(pid); }
+      let topRating = -Infinity, topPlayerId = -1;
+      for (const [pid, r] of Object.entries(playerMaxRating)) {
+        if (r > topRating) { topRating = r; topPlayerId = Number(pid); }
       }
       if (topPlayerId === -1) continue;
 
-      // Apply ×2 to the top scorer's rows
+      // Apply ×2 to all of the top fragger's rows across the whole matchday
       for (const log of mdLogs.filter(l => l.player_id === topPlayerId)) {
         await sb.from("score_logs").update({ final_pts: log.raw_pts * 2 }).eq("id", log.id);
       }
 
-      console.log(`  [topfragger] Team ${teamId}: top scorer = player_id=${topPlayerId} raw_pts=${topPts}`);
+      console.log(`  [topfragger] Team ${teamId}: top fragger = player_id=${topPlayerId} rating=${topRating}`);
     }
 
     // Recalculate matchday_scores by summing ALL score_logs for this matchday per team.

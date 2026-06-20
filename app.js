@@ -1437,7 +1437,7 @@ async function renderPredictPage(){
   const [{data:myPreds,error:e1},{data:allPreds},{data:allTeams}] = await Promise.all([
     sb.from('predictions').select('*').eq('team_id',myTeamId).eq('tournament_id',TOURNAMENT.id),
     sb.from('predictions').select('team_id,points_earned').eq('tournament_id',TOURNAMENT.id),
-    sb.from('teams').select('id,team_name,users!inner(manager_name)').eq('tournament_id',TOURNAMENT.id),
+    sb.from('teams').select('id,team_name,prediction_adj_pts,users!inner(manager_name)').eq('tournament_id',TOURNAMENT.id),
   ]);
   if(e1){
     el.innerHTML=`<div style="text-align:center;padding:60px;color:var(--red);font-size:12px">DB error: ${e1.message}<br><br>Have you run the SQL to create the predictions table?</div>`;
@@ -1450,7 +1450,7 @@ async function renderPredictPage(){
   // Build prediction leaderboard
   const predTotals={};
   for(const p of (allPreds||[])){ if(p.points_earned!=null) predTotals[p.team_id]=(predTotals[p.team_id]||0)+p.points_earned; }
-  const sortedTeams=(allTeams||[]).map(t=>({...t,predPts:predTotals[t.id]||0})).sort((a,b)=>b.predPts-a.predPts);
+  const sortedTeams=(allTeams||[]).map(t=>({...t,predPts:(predTotals[t.id]||0)+(t.prediction_adj_pts||0)})).sort((a,b)=>b.predPts-a.predPts);
 
   const curMD=MATCHDAYS.find(m=>m.id===predMDId);
   const mdFixtures=FIXTURES.filter(f=>f.matchday_id===predMDId);

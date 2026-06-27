@@ -305,63 +305,91 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { action, match_url, matchday_id, tournament_id, fixture_id } = body;
 
-    // ── Finalize Top Fragger: run once after all matches in the matchday are scored ──
+    // ── Finalize: apply all chip/captain multipliers once all matches in the matchday are scored ──
     if (action === "finalize") {
       if (!matchday_id || !tournament_id) return json({ error: "matchday_id and tournament_id required" }, 400);
       const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-      const { data: tfChips } = await sb.from("active_chips")
-        .select("team_id").eq("matchday_id", matchday_id).eq("chip_name", "topfragger");
+      // All teams that have score_logs this matchday
+      const { data: mdTeamRows } = await sb.from("score_logs")
+        .select("team_id").eq("matchday_id", matchday_id);
+      const teamIds = [...new Set((mdTeamRows ?? []).map((r: any) => r.team_id as string))];
+
+      // Chip per team
+      const { data: allChips } = await sb.from("active_chips")
+        .select("team_id, chip_name").eq("matchday_id", matchday_id);
+      const chipMap: Record<string, string> = {};
+      for (const c of (allChips ?? [])) chipMap[c.team_id] = c.chip_name;
+
+      // Transfer penalties
+      const { data: penaltyTransfers } = await sb.from("transfers")
+        .select("team_id").eq("matchday_id", matchday_id).eq("penalty_applied", true);
+      const { data: tournamentRow } = await sb.from("tournaments")
+        .select("transfer_penalty").eq("id", tournament_id).single();
+      const penaltyPerTransfer: number = tournamentRow?.transfer_penalty ?? 8;
+      const penaltyCount: Record<string, number> = {};
+      for (const tr of (penaltyTransfers ?? [])) {
+        penaltyCount[tr.team_id] = (penaltyCount[tr.team_id] ?? 0) + 1;
+      }
 
       let teamsFinalized = 0;
-      for (const chip of (tfChips ?? [])) {
-        const teamId = chip.team_id;
+      for (const teamId of teamIds) {
+        const chip = chipMap[teamId] ?? null;
 
         const { data: mdLogs } = await sb.from("score_logs")
-          .select("id, player_id, raw_pts, rating_2_0")
+          .select("id, player_id, raw_pts, rating_2_0, is_captain")
           .eq("team_id", teamId).eq("matchday_id", matchday_id);
         if (!mdLogs?.length) continue;
 
-        // Reset all to raw_pts
+        // Step 1: Reset all final_pts to raw_pts
         for (const log of mdLogs) {
           await sb.from("score_logs").update({ final_pts: log.raw_pts }).eq("id", log.id);
         }
 
-        // Find player with highest Rating 2.0 (max across all their matches)
-        const playerMaxRating: Record<number, number> = {};
-        for (const log of mdLogs) {
-          const r = log.rating_2_0 ?? 0;
-          if (r > (playerMaxRating[log.player_id] ?? -Infinity)) playerMaxRating[log.player_id] = r;
+        // Step 2: Apply chip/captain multiplier
+        if (chip === "topfragger") {
+          // Find player with highest Rating 2.0 (max across matches), apply ×2
+          const playerMaxRating: Record<number, number> = {};
+          for (const log of mdLogs) {
+            const r = log.rating_2_0 ?? 0;
+            if (r > (playerMaxRating[log.player_id] ?? -Infinity)) playerMaxRating[log.player_id] = r;
+          }
+          let topRating = -Infinity, topPlayerId = -1;
+          for (const [pid, r] of Object.entries(playerMaxRating)) {
+            if (r > topRating) { topRating = r; topPlayerId = Number(pid); }
+          }
+          if (topPlayerId !== -1) {
+            for (const log of mdLogs.filter((l: any) => l.player_id === topPlayerId)) {
+              await sb.from("score_logs").update({ final_pts: log.raw_pts * 2 }).eq("id", log.id);
+            }
+            console.log(`  [finalize] Team ${teamId}: topfragger player_id=${topPlayerId} rating=${topRating}`);
+          }
+        } else {
+          // Captain multiplier: ×3 for triplecap, ×2 for all others
+          const mult = chip === "triplecap" ? 3 : 2;
+          const captainLogs = mdLogs.filter((l: any) => l.is_captain);
+          for (const log of captainLogs) {
+            await sb.from("score_logs").update({ final_pts: log.raw_pts * mult }).eq("id", log.id);
+          }
+          console.log(`  [finalize] Team ${teamId}: chip=${chip ?? "none"} captain ×${mult} (${captainLogs.length} rows)`);
         }
-        let topRating = -Infinity, topPlayerId = -1;
-        for (const [pid, r] of Object.entries(playerMaxRating)) {
-          if (r > topRating) { topRating = r; topPlayerId = Number(pid); }
-        }
-        if (topPlayerId === -1) continue;
 
-        // Apply ×2 to all of that player's rows across the matchday
-        for (const log of mdLogs.filter(l => l.player_id === topPlayerId)) {
-          await sb.from("score_logs").update({ final_pts: log.raw_pts * 2 }).eq("id", log.id);
-        }
-
-        // Recalculate matchday_scores
+        // Step 3: Recalculate matchday_scores
         const { data: allLogs } = await sb.from("score_logs").select("final_pts")
           .eq("team_id", teamId).eq("matchday_id", matchday_id);
-        const { data: existingScore } = await sb.from("matchday_scores").select("penalty_points")
-          .eq("team_id", teamId).eq("matchday_id", matchday_id).single();
-        const penalty = existingScore?.penalty_points ?? 0;
-        const totalRaw = (allLogs ?? []).reduce((s: number, r: any) => s + (r.final_pts ?? 0), 0);
+        const penCount = penaltyCount[teamId] ?? 0;
+        const penalty = penCount * penaltyPerTransfer;
+        const totalFinal = (allLogs ?? []).reduce((s: number, r: any) => s + (r.final_pts ?? 0), 0);
         await sb.from("matchday_scores").upsert(
-          { team_id: teamId, matchday_id, raw_points: totalRaw, penalty_points: penalty, net_points: totalRaw - penalty },
+          { team_id: teamId, matchday_id, raw_points: totalFinal, penalty_points: penalty, net_points: totalFinal - penalty },
           { onConflict: "team_id,matchday_id" }
         );
 
-        // Update total_points
+        // Step 4: Update total_points
         const { data: allScores } = await sb.from("matchday_scores").select("net_points").eq("team_id", teamId);
         const total = (allScores ?? []).reduce((s: number, r: any) => s + (r.net_points ?? 0), 0);
         await sb.from("teams").update({ total_points: total }).eq("id", teamId);
 
-        console.log(`  [finalize] Team ${teamId}: top fragger player_id=${topPlayerId} rating=${topRating}`);
         teamsFinalized++;
       }
       return json({ ok: true, teamsFinalized });
@@ -544,20 +572,17 @@ Deno.serve(async (req) => {
 
         const isCaptain = team.captainId === playerId;
         const isCaptain2 = team.captain2Id === playerId;
-        // topfragger: captain auto-assigned after matchday via rating — no captain bonus in regular scoring
-        const isAnyCaptain = team.chip !== "topfragger" && (isCaptain || isCaptain2);
+        const isAnyCaptain = isCaptain || isCaptain2;
 
-        let effectiveChip = team.chip;
-        if (team.chip === "topfragger") effectiveChip = null; // handled separately
-
-        const { rawPts, finalPts: baseFinal } = calculateScore(
+        // Captain/chip multipliers are applied in the Finalize step after all matches are scored.
+        // During match scoring we only store raw_pts; final_pts = raw_pts here.
+        const { rawPts } = calculateScore(
           { kills: d.kills, k4: d.k4, k5: d.k5, k6: d.k6, k7: d.k7,
             clutch_1v2: d.clutch1v2, clutch_1v3: d.clutch1v3, clutch_1v4: d.clutch1v4, clutch_1v5: d.clutch1v5,
             is_winner: d.isWinner, clean_sheet_win: d.cleanSheetWin },
-          rank, isLowest, isAnyCaptain, effectiveChip
+          rank, isLowest, false, null
         );
-
-        const finalPts = baseFinal;
+        const finalPts = rawPts;
         teamRaw += finalPts;
 
         // Build and store per-player breakdown
@@ -565,7 +590,7 @@ Deno.serve(async (req) => {
           { kills: d.kills, k4: d.k4, k5: d.k5, k6: d.k6, k7: d.k7,
             clutch_1v2: d.clutch1v2, clutch_1v3: d.clutch1v3, clutch_1v4: d.clutch1v4, clutch_1v5: d.clutch1v5,
             is_winner: d.isWinner, clean_sheet_win: d.cleanSheetWin },
-          rank, isLowest, isAnyCaptain, effectiveChip
+          rank, isLowest, false, null
         );
         calcLog.teams[teamId].players.push({ playerName, slot, playerId, isCaptain: isAnyCaptain, ...bd });
         console.log(
@@ -575,7 +600,7 @@ Deno.serve(async (req) => {
           `clutch=${bd.clutchTotal}(${bd.clutchPts}pt)`,
           `ratingRank=${rank}(${bd.ratingPts}pt)${isLowest ? " LOWEST(-3)" : ""}`,
           `win=${d.isWinner}(${bd.winPts}pt) cs=${d.cleanSheetWin}(${bd.cleanSheetPts}pt)`,
-          `→ raw=${rawPts} ×${bd.captainMult} = final=${finalPts}`
+          `→ raw=${rawPts} (chip/captain multiplier deferred to Finalize)`
         );
 
         scoreLogs.push({

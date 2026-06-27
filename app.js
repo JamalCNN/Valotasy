@@ -211,8 +211,13 @@ async function loadMySlotScores(){
   mySlotScores = {};
   if(!myTeamId||!currentMDId) return;
   const {data} = await sb.from('score_logs')
-    .select('player_id,final_pts').eq('team_id',myTeamId).eq('matchday_id',currentMDId);
-  for(const r of (data||[])){ mySlotScores[r.player_id]=(mySlotScores[r.player_id]||0)+r.final_pts; }
+    .select('player_id,final_pts,raw_pts,match_id').eq('team_id',myTeamId).eq('matchday_id',currentMDId)
+    .order('id');
+  for(const r of (data||[])){
+    if(!mySlotScores[r.player_id]) mySlotScores[r.player_id]={total:0,matches:[]};
+    mySlotScores[r.player_id].total+=(r.final_pts||0);
+    mySlotScores[r.player_id].matches.push({raw:r.raw_pts||0,match_id:r.match_id});
+  }
 }
 
 // ===== REALTIME =====
@@ -492,8 +497,8 @@ async function expandTeam(expId, teamId){
   // score_logs records exactly which players were in which slots when matches were scored,
   // so it correctly shows the squad AS IT WAS during that matchday, not the current roster.
   const {data:logs} = await sb.from('score_logs')
-    .select('player_id,player_name,slot,is_captain,final_pts,raw_pts,chip_used')
-    .eq('team_id',teamId).eq('matchday_id',lbMDId);
+    .select('player_id,player_name,slot,is_captain,final_pts,raw_pts,chip_used,match_id')
+    .eq('team_id',teamId).eq('matchday_id',lbMDId).order('id');
 
   const chips = document.createElement('div'); chips.className='player-chips';
 
@@ -519,16 +524,15 @@ async function expandTeam(expId, teamId){
     // Aggregate multiple matches within the same matchday per slot
     const slotMap={};
     for(const l of logs){
-      if(!slotMap[l.slot]) slotMap[l.slot]={player_id:l.player_id,player_name:l.player_name,is_captain:l.is_captain,chip_used:l.chip_used,pts:0,raw:0};
-      slotMap[l.slot].pts+=(l.final_pts||0);
-      slotMap[l.slot].raw+=(l.raw_pts||0);
+      if(!slotMap[l.slot]) slotMap[l.slot]={player_id:l.player_id,player_name:l.player_name,is_captain:l.is_captain,chip_used:l.chip_used,total:0,matches:[]};
+      slotMap[l.slot].total+=(l.final_pts||0);
+      slotMap[l.slot].matches.push({raw:l.raw_pts||0,match_id:l.match_id});
     }
-    // Detect top fragger: if ANY log for this team has chip_used='topfragger',
-    // the player whose aggregated pts > raw is the auto-captain (got ×2).
-    const teamUsesTopfragger=logs.some(l=>l.chip_used==='topfragger');
+    const teamChip=logs[0]?.chip_used||null;
+    // Top fragger: player whose final_pts sum > raw_pts sum (got ×2 in finalize)
     const tfPlayerIds=new Set(
-      teamUsesTopfragger
-        ? Object.values(slotMap).filter(s=>s.pts>s.raw&&!s.is_captain).map(s=>s.player_id)
+      teamChip==='topfragger'
+        ? Object.values(slotMap).filter(s=>s.total>s.matches.reduce((a,m)=>a+m.raw,0)).map(s=>s.player_id)
         : []
     );
     // Fetch role/vct_team for display
@@ -541,10 +545,12 @@ async function expandTeam(expId, teamId){
       const entry=slotMap[sl.id]; if(!entry) continue;
       const meta=playerMeta[entry.player_id]||{};
       const isTF=tfPlayerIds.has(entry.player_id);
+      const rawMatches=entry.matches.map(m=>m.raw);
+      const ptsLabel=rawMatches.length>1?`[${rawMatches.join(', ')}] = ${entry.total}`:`${entry.total}`;
       chips.innerHTML+=`<div class="pc ${entry.is_captain?'cap':''}" style="${isTF?'border-color:rgba(255,185,0,0.5);background:rgba(255,185,0,0.07)':''}">
         <div class="pc-role">${meta.role||sl.label}</div>
         <div class="pc-name">${entry.player_name}${isTF?' <span style="font-size:9px;color:var(--gold);letter-spacing:1px">🎯TF</span>':''}</div>
-        <div class="pc-team">${meta.vct_team||''}</div><div class="pc-pts">${entry.pts} pts</div></div>`;
+        <div class="pc-team">${meta.vct_team||''}</div><div class="pc-pts">${ptsLabel} pts</div></div>`;
     }
   }
 
@@ -618,8 +624,10 @@ function renderSlots(){
   document.getElementById('slotsGrid').innerHTML=SLOTS.map(sl=>{
     const p=myRosters[sl.id];
     const isCap=p&&(myCaptainId===p.id||myCaptain2Id===p.id);
-    const pts=p?mySlotScores[p.id]||0:0;
-    const dispPts=isCap?pts*2:pts;
+    const scoreData=p?mySlotScores[p.id]||{total:0,matches:[]}:{total:0,matches:[]};
+    const dispPts=scoreData.matches.length>1
+      ?`[${scoreData.matches.map(m=>m.raw).join(', ')}] = ${scoreData.total}`
+      :`${scoreData.total}`;
     const changed=savedRosters[sl.id]?.id!==p?.id;
     const pendingClass=changed?'slot-pending':'';
     return p
@@ -1118,7 +1126,7 @@ function renderAdminMatchdays(){
         ${md.scores_locked?`<span style="font-size:9px;padding:2px 6px;border-radius:2px;background:rgba(250,204,21,0.12);color:#facc15">📊 SCORES FINAL</span>`:''}
         <button onclick="setMarket(${md.id},${!md.market_open})" class="btn-sm ${md.market_open?'btn-del':'btn-edit'}" style="margin-left:auto">${md.market_open?'🔒 Lock':'🔓 Open'}</button>
         <button onclick="lockMatchdayScores(${md.id},${!md.scores_locked})" class="btn-sm" style="font-size:9px;background:${md.scores_locked?'rgba(250,204,21,0.1)':'rgba(255,255,255,0.06)'};border:0.5px solid ${md.scores_locked?'rgba(250,204,21,0.3)':'var(--border2)'};color:${md.scores_locked?'#facc15':'var(--muted)'}">${md.scores_locked?'🔓 Unlock Scores':'📊 Lock Scores'}</button>
-        <button onclick="finalizeMatchday(${md.id})" class="btn-sm" style="font-size:9px;background:rgba(255,185,0,0.1);border:0.5px solid rgba(255,185,0,0.3);color:var(--gold);${allFixturesDone?'':'opacity:0.35;pointer-events:none'}" ${allFixturesDone?'':'disabled'}>🎯 Finalize TF</button>
+        <button onclick="finalizeMatchday(${md.id})" class="btn-sm" style="font-size:9px;background:rgba(255,185,0,0.1);border:0.5px solid rgba(255,185,0,0.3);color:var(--gold);${allFixturesDone?'':'opacity:0.35;pointer-events:none'}" ${allFixturesDone?'':'disabled'}>🏁 Finalize</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:${dlDisplay?'4px':'8px'}">
         <span style="font-size:10px;font-weight:500;letter-spacing:0.5px;color:var(--muted);text-transform:uppercase;white-space:nowrap">⏰ Deadline</span>

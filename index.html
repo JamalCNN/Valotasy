@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VALOTASY — Masters London 2026</title>
+<title>VALOTASY — Champions Shanghai 2026</title>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <!-- Flatpickr date picker -->
@@ -192,7 +192,7 @@
   <div class="container">
     <div class="hero">
       <div class="event-tag">⚡ VCT 2026 — FANTASY LEAGUE</div>
-      <h1>VALO<span>TASY</span><br>MASTERS LONDON</h1>
+      <h1>VALO<span>TASY</span><br>CHAMPIONS SHANGHAI</h1>
       <div class="hero-sub">LIVE LEADERBOARD · UPDATED AFTER EACH MATCHDAY</div>
     </div>
     <div class="md-nav" id="lbMdNav"></div>
@@ -225,7 +225,7 @@
     </div>
     <div class="team-builder">
       <div>
-        <div style="font-size:10px;font-weight:500;letter-spacing:1px;color:var(--muted);margin-bottom:10px;text-transform:uppercase">Click a slot to pick a player · Max 2 per VCT team</div>
+        <div style="font-size:10px;font-weight:500;letter-spacing:1px;color:var(--muted);margin-bottom:10px;text-transform:uppercase">Click a slot to pick a player · Same-team limit: see Rules</div>
         <div class="slots-grid" id="slotsGrid"></div>
         <div id="changesPanel" style="display:none;margin-top:12px"></div>
         <div style="margin-top:12px;font-size:11px;font-weight:500;color:var(--muted)">
@@ -303,7 +303,7 @@
     <div class="hero" style="padding:40px 20px 24px">
       <div class="event-tag">📖 RULEBOOK</div>
       <h1>VALO<span>TASY</span><br>RULES</h1>
-      <div class="hero-sub">MASTERS LONDON 2026</div>
+      <div class="hero-sub">CHAMPIONS SHANGHAI 2026</div>
     </div>
 
     <div class="rules-section">
@@ -316,41 +316,41 @@
         <tr><td>Controller</td><td>1</td><td>Must be Controller</td></tr>
         <tr><td>Sentinel</td><td>1</td><td>Must be Sentinel</td></tr>
       </table>
-      <p>⚠️ Max <strong>2 players</strong> from the same VCT team</p>
+      <p>⚠️ Until the <strong>Lower Round 2</strong> deadline: max <strong>2 players</strong> from the same VCT team</p>
+      <p>From <strong>Lower Round 2</strong> onward: <strong>no limit</strong> — pick any number of players from the same VCT team</p>
     </div>
 
     <div class="rules-section">
       <h2>Budget System</h2>
       <p>Each fantasy team has a <strong>100M</strong> budget to pick players</p>
-      <table class="rule-table">
-        <tr><th>Tier</th><th>Price</th></tr>
-        <tr><td><span class="tag tag-S">S</span></td><td style="color:var(--gold)">24M</td></tr>
-        <tr><td><span class="tag tag-A">A</span></td><td style="color:var(--silver)">16M</td></tr>
-        <tr><td><span class="tag tag-B">B</span></td><td style="color:#CD7F32">10M</td></tr>
-        <tr><td><span class="tag tag-C">C</span></td><td style="color:#6b7280">6M</td></tr>
-      </table>
+      <p>Player prices range from <strong style="color:var(--accent)">6M to 25M</strong></p>
       <h3>Price Changes (after Admin enters scores)</h3>
       <table class="rule-table">
         <tr><th>MD Score</th><th>Price Change</th></tr>
-        <tr><td>&gt; 23 pts</td><td style="color:#4ade80"><strong>+1.5M</strong></td></tr>
-        <tr><td>18–23 pts</td><td style="color:#4ade80">+1M</td></tr>
-        <tr><td>13–17 pts</td><td style="color:#86efac">+0.5M</td></tr>
-        <tr><td>6–12 pts</td><td style="color:var(--muted)">No change</td></tr>
-        <tr><td>3–5 pts</td><td style="color:#fca5a5">-0.5M</td></tr>
-        <tr><td>0–2 pts</td><td style="color:#f87171">-1M</td></tr>
-        <tr><td>&lt; 0 pts</td><td style="color:var(--red)"><strong>-1.5M</strong></td></tr>
-        <tr><td colspan="2" style="color:var(--muted);font-size:11px">Max price 30M · Min price 4M</td></tr>
+        <tr><td>&gt; 23 pts</td><td style="color:#4ade80"><strong>+0.3M</strong></td></tr>
+        <tr><td>20–23 pts</td><td style="color:#4ade80">+0.2M</td></tr>
+        <tr><td>16–19 pts</td><td style="color:#86efac">+0.1M</td></tr>
+        <tr><td>7–15 pts</td><td style="color:var(--muted)">No change</td></tr>
+        <tr><td>3–6 pts</td><td style="color:#fca5a5">-0.1M</td></tr>
+        <tr><td>0–2 pts</td><td style="color:#f87171">-0.2M</td></tr>
+        <tr><td>&lt; 0 pts</td><td style="color:var(--red)"><strong>-0.3M</strong></td></tr>
+        <tr><td colspan="2" style="color:var(--muted);font-size:11px">Max price 25M · Min price 6M</td></tr>
       </table>
     </div>
 
     <div class="rules-section">
       <h2>Transfer Rules</h2>
-      <h3>Before Knockout</h3>
+      <h3>Before MD1 Deadline</h3>
+      <p><strong style="color:#4ade80">Unlimited</strong> transfers — change any number of players, as many times as you like ♾️</p>
+      <h3>MD2 onward</h3>
       <p><strong>2 free transfers</strong> per Matchday</p>
-      <p>Extra transfers beyond 2 cost <strong style="color:var(--red)">-8 pts</strong> each</p>
+      <p>Each transfer beyond 2 costs <strong style="color:var(--red)">-8 pts</strong> per player</p>
+      <h3>From Lower Round 2</h3>
+      <p><strong>3 free transfers</strong> per Matchday</p>
+      <p>Each transfer beyond 3 costs <strong style="color:var(--red)">-8 pts</strong> per player</p>
+      <h3>Swap by position only</h3>
+      <p>A player can only be replaced by a player of the same position — Duelist ↔ Duelist, Initiator ↔ Initiator, Controller ↔ Controller, Sentinel ↔ Sentinel. <strong>Any</strong> slots can be swapped with any position.</p>
       <p>Free transfers do not carry over between Matchdays</p>
-      <h3>Knockout Round</h3>
-      <p>Up to <strong>2 free transfers</strong> per round, no penalty</p>
       <p>⏰ Manage your team until the <strong>Deadline</strong> before the first match of that Matchday</p>
     </div>
 

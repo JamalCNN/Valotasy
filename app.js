@@ -836,17 +836,21 @@ function setFilter(f,el){ pickerFilter=f; document.querySelectorAll('#picker-rol
 function setPickerTierFilter(f,el){ pickerTierFilter=f; document.querySelectorAll('#picker-tier-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
 function setPickerPriceFilter(f,el){ pickerPriceFilter=f; document.querySelectorAll('#picker-price-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
 
-function teamLimitForMD(){
+// matchday_number of Lower Round 2 in the current tournament (Champions Shanghai).
+// From this matchday onward: no same-team limit and 3 free transfers.
+// TODO: set once the Lower Round 2 matchday exists. While null, neither rule kicks in.
+const LOWER_R2_MD=null;
+
+function isLowerR2OrLater(){
+  if(LOWER_R2_MD==null) return false;
   const mdNum=MATCHDAYS.find(m=>m.id===currentMDId)?.matchday_number??1;
-  if(mdNum>=7) return Infinity;
-  if(mdNum>=6) return 3;
-  return 2;
+  return mdNum>=LOWER_R2_MD;
+}
+function teamLimitForMD(){
+  return isLowerR2OrLater()?Infinity:2;
 }
 function freeTransfersForMD(){
-  const mdNum=MATCHDAYS.find(m=>m.id===currentMDId)?.matchday_number??1;
-  if(mdNum>=7) return 4;
-  if(mdNum>=6) return 3;
-  return 2;
+  return isLowerR2OrLater()?3:2;
 }
 
 function renderPicker(){
@@ -1223,16 +1227,17 @@ async function clearDeadline(mdId){
 
 // ── Price Change Formula ─────────────────────────────────────────
 // Based on player's total raw_pts across all matches in a matchday
-// > 23 → +1.5M | 18-23 → +1M | 13-17 → +0.5M | 6-12 → 0
-// 3-5 → -0.5M | 1-2 → -1M | < 1 → -1.5M | Max 30M · Min 4M
+// > 23 → +0.3M | 20-23 → +0.2M | 16-19 → +0.1M | 7-15 → 0
+// 3-6 → -0.1M | 0-2 → -0.2M | < 0 → -0.3M | Max 25M · Min 6M
+const PRICE_MIN=6, PRICE_MAX=25;
 function priceChangeDelta(score){
-  if(score > 23)  return  1.5;
-  if(score >= 18) return  1.0;
-  if(score >= 13) return  0.5;
-  if(score >= 6)  return  0.0;
-  if(score >= 3)  return -0.5;
-  if(score >= 1)  return -1.0;
-  return -1.5;
+  if(score > 23)  return  0.3;
+  if(score >= 20) return  0.2;
+  if(score >= 16) return  0.1;
+  if(score >= 7)  return  0.0;
+  if(score >= 3)  return -0.1;
+  if(score >= 0)  return -0.2;
+  return -0.3;
 }
 
 async function updatePlayerPrices(mdId){
@@ -1286,7 +1291,7 @@ async function updatePlayerPrices(mdId){
     if(!entry){ continue; } // didn't play this matchday
     const score = entry.pts;
     const d = priceChangeDelta(score);
-    const newPrice = Math.min(30, Math.max(4, +(p.price + d).toFixed(1)));
+    const newPrice = Math.min(PRICE_MAX, Math.max(PRICE_MIN, +(p.price + d).toFixed(1)));
     const capped = newPrice === p.price + d ? '' : ' [CAPPED]';
     log.push(`${p.name}: pts=${score} delta=${d>=0?'+':''}${d} ${p.price}M→${newPrice}M${capped}`);
     await sb.from('players').update({previous_price: p.price, price: newPrice}).eq('id', p.id);
@@ -1640,7 +1645,7 @@ function renderSchedulePage(){
   el.innerHTML=`<div class="hero" style="padding:40px 20px 28px">
     <div class="event-tag">📅 MATCH SCHEDULE</div>
     <h1>VALO<span>TASY</span><br>SCHEDULE</h1>
-    <div class="hero-sub">VCT MASTERS LONDON 2026</div>
+    <div class="hero-sub">VCT CHAMPIONS SHANGHAI 2026</div>
   </div>
   <div>${html||'<div style="text-align:center;padding:40px;color:var(--muted)">No fixtures scheduled yet</div>'}</div>`;
 }

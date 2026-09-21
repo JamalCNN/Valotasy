@@ -143,6 +143,45 @@ function extractAllMapsSection(html: string): string {
   return html.slice(start, end);
 }
 
+// Current VLR layout: each team is a <div class="ovw-table"> of <div class="ovw-row"> player rows,
+// with stat cells addressed by data-col (rating2, acs, kills, deaths). The header row is "ovw-row mod-head".
+// The first table is the first/left team, matching the old <table> order.
+function parseOverviewDivs(allHtml: string, winnerTeamIdx: number, cleanSheet: boolean): Record<string, PlayerStats> {
+  const stats: Record<string, PlayerStats> = {};
+  const teamBlocks = allHtml.split(/<div class="ovw-table[^"]*">/).slice(1, 3);
+
+  teamBlocks.forEach((block, tIdx) => {
+    const isWinner = tIdx === winnerTeamIdx;
+
+    for (const row of block.split('<div class="ovw-row">').slice(1)) {
+      const nameMatch = row.match(/class="ovw-player-name[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+      if (!nameMatch) continue;
+      const displayName = nameMatch[1].replace(/<[^>]+>/g, "").trim();
+      if (!displayName) continue;
+
+      // Value of the "all sides" span inside the cell for this data-col
+      const colBoth = (col: string): number => {
+        const m = row.match(new RegExp(`data-col="${col}"(?:(?!data-col=)[\\s\\S])*?mod-both[^>]*>([^<]*)<`));
+        return m ? parseNum(m[1]) : 0;
+      };
+
+      stats[displayName.toLowerCase()] = {
+        displayName,
+        kills: colBoth("kills"),
+        deaths: colBoth("deaths"),
+        acs: colBoth("acs"),
+        rating20: colBoth("rating2"),
+        k4: 0, k5: 0, k6: 0, k7: 0,
+        clutch1v2: 0, clutch1v3: 0, clutch1v4: 0, clutch1v5: 0,
+        isWinner,
+        cleanSheetWin: isWinner && cleanSheet,
+      };
+    }
+  });
+
+  return stats;
+}
+
 function scrapeOverview(html: string): { stats: Record<string, PlayerStats>; matchId: string; resultA: number; resultB: number } {
   // Parse series score from the explicit loser/winner spans — avoids matching map durations
   let winnerTeamIdx = -1;
@@ -167,7 +206,11 @@ function scrapeOverview(html: string): { stats: Record<string, PlayerStats>; mat
   const allHtml = extractAllMapsSection(html);
   if (!allHtml) return { stats: {}, matchId: "", resultA, resultB };
 
-  // Parse the two mod-overview tables inside the All Maps section (one per team)
+  // Current div-based layout first; fall back to the legacy <table> layout below
+  const divStats = parseOverviewDivs(allHtml, winnerTeamIdx, cleanSheet);
+  if (Object.keys(divStats).length) return { stats: divStats, matchId: "", resultA, resultB };
+
+  // Legacy layout: parse the two mod-overview tables inside the All Maps section (one per team)
   const stats: Record<string, PlayerStats> = {};
   const tableRegex = /<table[^>]*class="[^"]*wf-table-inset mod-overview[^"]*"[\s\S]*?<\/table>/g;
   const tables = [...allHtml.matchAll(tableRegex)];
@@ -265,10 +308,11 @@ function scrapePerformance(html: string, stats: Record<string, PlayerStats>): vo
     const cells = [...row.matchAll(/<td[\s\S]*?<\/td>/g)].map(c => c[0]);
     if (!cells.length) continue;
 
-    // Player name: strip all tags, split on whitespace, first token is the IGN
-    const nameTokens = cells[0].replace(/<[^>]+>/g, " ").trim().split(/\s+/).filter(Boolean);
-    const nameRaw = nameTokens[0] ?? "";
-    const nk = nameRaw.toLowerCase();
+    // Player name: text before the team tag (keeps IGNs that contain spaces);
+    // fall back to the first whitespace token for older markup without a team-tag div
+    const beforeTag = cells[0].split(/<div class="team-tag/)[0].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const firstToken = cells[0].replace(/<[^>]+>/g, " ").trim().split(/\s+/).filter(Boolean)[0] ?? "";
+    const nk = stats[beforeTag.toLowerCase()] ? beforeTag.toLowerCase() : firstToken.toLowerCase();
     if (!stats[nk]) continue;
 
     // Extract first number at start of stripped cell text (before round-detail noise)

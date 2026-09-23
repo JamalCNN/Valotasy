@@ -2132,7 +2132,10 @@ async function init(){
   if(!dbReady) return;
   const ok = await loadAppData();
   if(!ok) return;
-  await seedPlayers();
+  // seedPlayers() no longer runs automatically — it used to insert the Masters London
+  // DEFAULT_PLAYERS list into ANY tournament with zero players, which would wrongly
+  // populate a new tournament (e.g. Champions Shanghai) with the wrong teams/roster.
+  // Add real players for a new tournament via Admin > Add Player instead.
   await tryAutoLogin();
   subscribeRealtime();
   renderLB();

@@ -332,8 +332,26 @@ function goPage(id){
   else stopCountdown();
   if(id==='team')     renderTeamPage();
   if(id==='players')  renderPlayersPage();
+  if(id==='rules')    renderRulesPage();
   if(id==='schedule') renderSchedulePage();
   if(id==='predict')  renderPredictPage();
+}
+
+// ── Rules page: matchday-by-matchday rules table, built from live data ──
+function renderRulesPage(){
+  const penEl=document.getElementById('rulesPenaltyPts');
+  if(penEl) penEl.textContent=`-${TOURNAMENT?.transfer_penalty??8} pts`;
+
+  const tblEl=document.getElementById('rulesMDTable'); if(!tblEl) return;
+  if(!MATCHDAYS.length){ tblEl.innerHTML=''; return; }
+  tblEl.innerHTML=`<table class="rule-table">
+    <tr><th>Matchday</th><th>Same-team limit</th><th>Free transfers</th><th>Price-change bands</th></tr>
+    ${MATCHDAYS.map(md=>{
+      const limit = md.same_team_limit==null ? 'Unlimited' : md.same_team_limit;
+      const free  = md.free_transfers==null  ? 'Unlimited' : md.free_transfers;
+      return `<tr><td>${md.label}</td><td>${limit}</td><td>${free}</td><td style="font-size:10px;white-space:nowrap">${formatBands(md.price_bands)}</td></tr>`;
+    }).join('')}
+  </table>`;
 }
 
 // ===== LEADERBOARD =====
@@ -599,18 +617,18 @@ function renderDeadlineBanner(curMD){
 
 function renderTransferInfo(curMD, locked){
   const tlEl=document.getElementById('transferLabel'); if(!tlEl) return;
-  const isMD1 = MATCHDAYS[0]?.id===currentMDId;
+  const unlimited = hasUnlimitedTransfers(curMD);
   const isWildcardActive = myChip==='wildcard';
   const penalty=TOURNAMENT?.transfer_penalty||8;
   const used=calcDraftTransfers();
-  if(isMD1){
-    tlEl.innerHTML='<span style="color:#4ade80">MD1 — Unlimited transfers</span>';
+  if(unlimited){
+    tlEl.innerHTML='<span style="color:#4ade80">♾️ Unlimited transfers</span>';
     document.getElementById('penaltyPts').textContent='-0 pts';
   } else if(isWildcardActive){
     tlEl.innerHTML=`Transfers this MD: <span style="color:#4ade80">${used}</span> &nbsp;<span style="color:#4ade80">🃏 Wildcard — no penalty</span>`;
     document.getElementById('penaltyPts').textContent='-0 pts';
   } else {
-    const free=freeTransfersForMD();
+    const free=freeTransfersForMD(curMD);
     const extra=Math.max(0,used-free);
     const penStr=extra>0?` &nbsp;<span style="color:var(--red)">+${extra} over (-${extra*penalty}pts)</span>`:'';
     tlEl.innerHTML=`Transfers this MD: <span style="color:${used>free?'var(--red)':'var(--text)'}">${used}</span>/${free}${penStr}`;
@@ -716,9 +734,9 @@ async function removePlayer(slotId){
   const isOrigPlayer=savedRosters[slotId]?.id===p.id;
   const buyPriceForSell=isOrigPlayer?(savedBuyPrices[slotId]||p.price):(myBuyPrices[slotId]||p.price);
   const sellVal=Math.min(buyPriceForSell, p.price||0);
-  const isMD1=MATCHDAYS[0]?.id===currentMDId;
+  const unlimited=hasUnlimitedTransfers(curMD);
   const isWildcard=myChip==='wildcard';
-  const transferWarning=(!isMD1&&!isWildcard)?'\nRe-adding them later will cost a transfer.':'';
+  const transferWarning=(!unlimited&&!isWildcard)?'\nRe-adding them later will cost a transfer.':'';
   const ok=await showConfirm('Remove Player',`Remove ${p.name}?\nSell value: ${sellVal}M${transferWarning}`,'Remove');
   if(!ok) return;
   delete myRosters[slotId]; delete myBuyPrices[slotId];
@@ -811,9 +829,9 @@ function calcMyPts(){
     return sum + (p ? (mySlotScores[p.id] || 0) : 0);
   }, 0);
   // Subtract transfer penalty (before any match scored, still preview correctly)
-  const isMD1 = MATCHDAYS[0]?.id === currentMDId;
+  const unlimited = hasUnlimitedTransfers();
   const isWildcard = myChip === 'wildcard';
-  if(!isMD1 && !isWildcard){
+  if(!unlimited && !isWildcard){
     const extra = Math.max(0, calcDraftTransfers() - freeTransfersForMD());
     total -= extra * (TOURNAMENT?.transfer_penalty || 8);
   }
@@ -836,21 +854,21 @@ function setFilter(f,el){ pickerFilter=f; document.querySelectorAll('#picker-rol
 function setPickerTierFilter(f,el){ pickerTierFilter=f; document.querySelectorAll('#picker-tier-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
 function setPickerPriceFilter(f,el){ pickerPriceFilter=f; document.querySelectorAll('#picker-price-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
 
-// matchday_number of Lower Round 2 in the current tournament (Champions Shanghai).
-// From this matchday onward: no same-team limit and 3 free transfers.
-// TODO: set once the Lower Round 2 matchday exists. While null, neither rule kicks in.
-const LOWER_R2_MD=null;
-
-function isLowerR2OrLater(){
-  if(LOWER_R2_MD==null) return false;
-  const mdNum=MATCHDAYS.find(m=>m.id===currentMDId)?.matchday_number??1;
-  return mdNum>=LOWER_R2_MD;
+// ── Per-matchday rules — admin-configurable in Admin > Matchdays, no code change or redeploy needed ──
+// same_team_limit: max players from one VCT team this matchday; NULL/unset = unlimited.
+// free_transfers: free transfers before the penalty kicks in; NULL = unlimited transfers, no penalty ever
+// (this is how MD1's initial-draft matchday works, and any other matchday can be set the same way).
+function currentMatchday(){ return MATCHDAYS.find(m=>m.id===currentMDId); }
+function teamLimitForMD(md){
+  const v=(md||currentMatchday())?.same_team_limit;
+  return (v==null)?Infinity:v;
 }
-function teamLimitForMD(){
-  return isLowerR2OrLater()?Infinity:2;
+function freeTransfersForMD(md){
+  return (md||currentMatchday())?.free_transfers ?? 2;
 }
-function freeTransfersForMD(){
-  return isLowerR2OrLater()?3:2;
+function hasUnlimitedTransfers(md){
+  md=md||currentMatchday();
+  return !md || md.free_transfers==null;
 }
 
 function renderPicker(){
@@ -928,13 +946,13 @@ async function confirmTeam(){
   const newName=(document.getElementById('myTeamName')?.value.trim())||myTeamName;
   if(!newName){toast('Please enter a team name');return;}
 
-  const isMD1=MATCHDAYS[0]?.id===currentMDId;
+  const unlimited=hasUnlimitedTransfers();
   const isWildcard=myChip==='wildcard';
   const savedIds=new Set(Object.values(savedRosters).map(p=>p?.id).filter(Boolean));
 
   // Build transfer log for new market players
   const transfers=[]; let txCount=savedTransferCount;
-  if(!isMD1&&!isWildcard&&currentMDId){
+  if(!unlimited&&!isWildcard&&currentMDId){
     for(const sl of SLOTS.map(s=>s.id)){
       const curr=myRosters[sl];
       if(!curr||savedIds.has(curr.id)) continue;
@@ -985,7 +1003,7 @@ function renderChangesPanel(){
   if(!isDirty){el.style.display='none'; el.innerHTML=''; return;}
 
   const savedIds=new Set(Object.values(savedRosters).map(p=>p?.id).filter(Boolean));
-  const isMD1=MATCHDAYS[0]?.id===currentMDId;
+  const unlimited=hasUnlimitedTransfers();
   const isWildcard=myChip==='wildcard';
   const rows=[];
 
@@ -996,7 +1014,7 @@ function renderChangesPanel(){
     const isTransfer=curr&&!savedIds.has(curr.id);
     const outLabel=orig?`<span style="color:var(--red)">${orig.name}</span>`:'<span style="color:var(--muted)">empty</span>';
     const inLabel=curr?`<span style="color:#4ade80">${curr.name}</span>`:'<span style="color:var(--muted)">removed</span>';
-    const badge=isTransfer&&!isMD1&&!isWildcard?'<span style="font-size:9px;background:rgba(255,70,85,0.15);color:var(--red);padding:1px 5px;border-radius:3px;margin-left:4px">TRANSFER</span>':'';
+    const badge=isTransfer&&!unlimited&&!isWildcard?'<span style="font-size:9px;background:rgba(255,70,85,0.15);color:var(--red);padding:1px 5px;border-radius:3px;margin-left:4px">TRANSFER</span>':'';
     rows.push(`<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">
       <span style="font-size:9px;color:var(--muted);width:32px;flex-shrink:0">${sl.label}</span>
       ${outLabel} <span style="color:var(--muted)">→</span> ${inLabel}${badge}
@@ -1006,8 +1024,8 @@ function renderChangesPanel(){
   const draftTx=calcDraftTransfers();
   const penalty=TOURNAMENT?.transfer_penalty||8;
   const freeTx=freeTransfersForMD();
-  const extra=(!isMD1&&!isWildcard)?Math.max(0,draftTx-freeTx):0;
-  const txStr=isMD1?'MD1 — free':`${draftTx}/${freeTx}${extra>0?` <span style="color:var(--red)">+${extra} penalty (-${extra*penalty}pts)</span>`:''}`;
+  const extra=(!unlimited&&!isWildcard)?Math.max(0,draftTx-freeTx):0;
+  const txStr=unlimited?'Unlimited — free':`${draftTx}/${freeTx}${extra>0?` <span style="color:var(--red)">+${extra} penalty (-${extra*penalty}pts)</span>`:''}`;
 
   el.style.display='block';
   el.innerHTML=`<div style="background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.15);border-radius:6px;padding:12px 16px;margin-bottom:10px">
@@ -1140,6 +1158,25 @@ function renderAdminMatchdays(){
         ${md.deadline?`<button onclick="clearDeadline(${md.id})" class="btn-sm btn-del" style="white-space:nowrap">Clear</button>`:''}
       </div>
       ${dlDisplay?`<div style="font-size:10px;color:var(--muted);margin-bottom:10px">📅 ${dlDisplay}</div>`:''}
+      <div style="background:var(--s2);border:0.5px solid var(--border2);border-radius:4px;padding:8px 10px;margin-bottom:10px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <span style="font-size:10px;font-weight:600;letter-spacing:0.5px;color:var(--muted);text-transform:uppercase;white-space:nowrap">⚙️ Matchday Rules</span>
+          <label style="font-size:10px;color:var(--muted);white-space:nowrap">Same-team limit</label>
+          <input id="stl_${md.id}" type="number" min="0" value="${md.same_team_limit??''}" placeholder="∞" title="Blank = unlimited" style="width:56px;background:var(--s1);border:0.5px solid var(--border2);color:var(--text);padding:4px 6px;font-size:11px;outline:none;border-radius:3px">
+          <label style="font-size:10px;color:var(--muted);white-space:nowrap">Free transfers</label>
+          <input id="ft_${md.id}" type="number" min="0" value="${md.free_transfers??''}" placeholder="∞" title="Blank = unlimited" style="width:56px;background:var(--s1);border:0.5px solid var(--border2);color:var(--text);padding:4px 6px;font-size:11px;outline:none;border-radius:3px">
+          <button onclick="saveMDRules(${md.id})" class="btn-sm btn-edit">Save</button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:10px;font-weight:600;letter-spacing:0.5px;color:var(--muted);text-transform:uppercase">💵 Price Bands${md.price_bands?'':' <span style="color:var(--muted);font-weight:400">(default)</span>'}</span>
+          <div style="display:flex;gap:4px">
+            <button onclick="addPriceBandRow(${md.id})" class="btn-sm" style="font-size:9px">+ Row</button>
+            <button onclick="resetPriceBands(${md.id})" class="btn-sm btn-del" style="font-size:9px">Reset</button>
+            <button onclick="savePriceBands(${md.id})" class="btn-sm btn-edit" style="font-size:9px">Save</button>
+          </div>
+        </div>
+        <div id="bands_${md.id}">${normalizeBands(md.price_bands).map(bandRowHtml).join('')}</div>
+      </div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <span style="font-size:10px;font-weight:600;letter-spacing:1px;color:var(--muted);text-transform:uppercase">🎮 Fixtures</span>
         <button id="priceBtn_${md.id}" onclick="updatePlayerPrices(${md.id})" class="btn-sm btn-edit" style="font-size:9px">💰 Update Prices</button>
@@ -1178,6 +1215,77 @@ function renderAdminMatchdays(){
       disableMobile: false, theme: 'dark',
     });
   });
+}
+
+// ── Matchday Rules editor (same-team limit / free transfers) ─────
+function parseLimitInput(raw){
+  const v=(raw??'').trim();
+  if(v==='') return {ok:true, value:null}; // blank = unlimited
+  const n=Number(v);
+  if(!Number.isFinite(n)||n<0) return {ok:false};
+  return {ok:true, value:Math.floor(n)};
+}
+
+async function saveMDRules(mdId){
+  const stl=parseLimitInput(document.getElementById('stl_'+mdId)?.value);
+  const ft=parseLimitInput(document.getElementById('ft_'+mdId)?.value);
+  if(!stl.ok){ toast('Same-team limit must be a whole number, or blank for unlimited'); return; }
+  if(!ft.ok){ toast('Free transfers must be a whole number, or blank for unlimited'); return; }
+  await sb.from('matchdays').update({same_team_limit:stl.value, free_transfers:ft.value}).eq('id',mdId);
+  const md=MATCHDAYS.find(m=>m.id===mdId);
+  if(md){ md.same_team_limit=stl.value; md.free_transfers=ft.value; }
+  renderAdminMatchdays();
+  if(currentMDId===mdId&&currentUser) renderTeamPage();
+  toast('Matchday rules saved ✓');
+}
+
+// ── Price Bands editor (per-matchday price-change formula) ────────
+function bandRowHtml(band){
+  return `<div class="band-row" style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+    <span style="font-size:10px;color:var(--muted);white-space:nowrap">Score ≥</span>
+    <input class="band-min" value="${band.min??''}" placeholder="else" style="width:56px;background:var(--s1);border:0.5px solid var(--border2);color:var(--text);padding:3px 6px;font-size:11px;outline:none;border-radius:3px">
+    <span style="font-size:10px;color:var(--muted)">→ Δ</span>
+    <input class="band-delta" value="${band.delta}" style="width:56px;background:var(--s1);border:0.5px solid var(--border2);color:var(--text);padding:3px 6px;font-size:11px;outline:none;border-radius:3px">
+    <span style="font-size:10px;color:var(--muted)">M</span>
+    <button onclick="this.closest('.band-row').remove()" class="btn-sm btn-del" style="padding:2px 7px">✕</button>
+  </div>`;
+}
+function addPriceBandRow(mdId){
+  const el=document.getElementById('bands_'+mdId); if(!el) return;
+  el.insertAdjacentHTML('beforeend', bandRowHtml({min:0, delta:0}));
+}
+function getBandsFromDOM(mdId){
+  const rows=[...document.querySelectorAll(`#bands_${mdId} .band-row`)];
+  const bands=[];
+  for(const r of rows){
+    const minRaw=r.querySelector('.band-min').value.trim();
+    const deltaRaw=r.querySelector('.band-delta').value.trim();
+    const delta=Number(deltaRaw);
+    if(deltaRaw===''||!Number.isFinite(delta)) return null;
+    let min=null;
+    if(minRaw!==''){
+      min=Number(minRaw);
+      if(!Number.isFinite(min)) return null;
+    }
+    bands.push({min, delta});
+  }
+  return bands;
+}
+async function savePriceBands(mdId){
+  const bands=getBandsFromDOM(mdId);
+  if(!bands){ toast('Each band needs a numeric Δ (min can be blank for the catch-all row)'); return; }
+  if(!bands.length){ toast('Add at least one band, or use Reset for the default table'); return; }
+  if(!bands.some(b=>b.min==null)){ toast('Add one row with a blank "Score ≥" as the catch-all for lower scores'); return; }
+  await sb.from('matchdays').update({price_bands:bands}).eq('id',mdId);
+  const md=MATCHDAYS.find(m=>m.id===mdId); if(md) md.price_bands=bands;
+  renderAdminMatchdays();
+  toast('Price bands saved ✓');
+}
+async function resetPriceBands(mdId){
+  await sb.from('matchdays').update({price_bands:null}).eq('id',mdId);
+  const md=MATCHDAYS.find(m=>m.id===mdId); if(md) md.price_bands=null;
+  renderAdminMatchdays();
+  toast('Price bands reset to default ✓');
 }
 
 async function setMarket(mdId, open){
@@ -1225,19 +1333,37 @@ async function clearDeadline(mdId){
   toast('Deadline cleared ✓');
 }
 
-// ── Price Change Formula ─────────────────────────────────────────
-// Based on player's total raw_pts across all matches in a matchday
-// > 23 → +0.3M | 20-23 → +0.2M | 16-19 → +0.1M | 7-15 → 0
-// 3-6 → -0.1M | 0-2 → -0.2M | < 0 → -0.3M | Max 25M · Min 6M
+// ── Price Change Formula — admin-configurable per matchday (matchdays.price_bands) ──
+// Based on player's total raw_pts across all matches in a matchday.
+// A band is {min, delta}: the first band (highest min first) whose min the score meets or beats
+// applies; a band with min:null is the catch-all and must be last. Used when a matchday has no
+// price_bands of its own (Admin > Matchdays > Price Bands can override per matchday).
+// Default: >23 → +0.3M | 20-23 → +0.2M | 16-19 → +0.1M | 7-15 → 0 | 3-6 → -0.1M | 0-2 → -0.2M | <0 → -0.3M
 const PRICE_MIN=6, PRICE_MAX=25;
-function priceChangeDelta(score){
-  if(score > 23)  return  0.3;
-  if(score >= 20) return  0.2;
-  if(score >= 16) return  0.1;
-  if(score >= 7)  return  0.0;
-  if(score >= 3)  return -0.1;
-  if(score >= 0)  return -0.2;
-  return -0.3;
+const DEFAULT_PRICE_BANDS=[
+  {min:24,  delta: 0.3},
+  {min:20,  delta: 0.2},
+  {min:16,  delta: 0.1},
+  {min:7,   delta: 0.0},
+  {min:3,   delta:-0.1},
+  {min:0,   delta:-0.2},
+  {min:null,delta:-0.3},
+];
+function normalizeBands(bands){
+  const list=(Array.isArray(bands)&&bands.length)?bands:DEFAULT_PRICE_BANDS;
+  return [...list].sort((a,b)=>(b.min??-Infinity)-(a.min??-Infinity));
+}
+function priceChangeDelta(score, bands){
+  for(const b of normalizeBands(bands)){
+    if(b.min==null||score>=b.min) return b.delta;
+  }
+  return 0;
+}
+function formatBands(bands){
+  return normalizeBands(bands).map(b=>{
+    const sign=b.delta>0?'+':'';
+    return `${b.min==null?'else':'≥'+b.min}: ${sign}${b.delta}M`;
+  }).join(' · ');
 }
 
 async function updatePlayerPrices(mdId){
@@ -1282,6 +1408,8 @@ async function updatePlayerPrices(mdId){
   const ptsMapLower = {};
   for(const [n,v] of Object.entries(ptsMap)) ptsMapLower[n.toLowerCase().trim()] = {pts:v, scraped:n};
 
+  const mdBands = MATCHDAYS.find(m=>m.id===mdId)?.price_bands;
+
   const unmatched = [];
   const log = [];
   let updated = 0;
@@ -1290,7 +1418,7 @@ async function updatePlayerPrices(mdId){
     const entry = ptsMapLower[key];
     if(!entry){ continue; } // didn't play this matchday
     const score = entry.pts;
-    const d = priceChangeDelta(score);
+    const d = priceChangeDelta(score, mdBands);
     const newPrice = Math.min(PRICE_MAX, Math.max(PRICE_MIN, +(p.price + d).toFixed(1)));
     const capped = newPrice === p.price + d ? '' : ' [CAPPED]';
     log.push(`${p.name}: pts=${score} delta=${d>=0?'+':''}${d} ${p.price}M→${newPrice}M${capped}`);

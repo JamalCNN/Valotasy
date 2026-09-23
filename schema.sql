@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS matchdays (
   phase            TEXT DEFAULT 'group',       -- 'group' | 'knockout'
   market_open      BOOLEAN DEFAULT TRUE,
   deadline         TIMESTAMPTZ,
+  scores_locked    BOOLEAN DEFAULT FALSE,
+  same_team_limit  INTEGER,                    -- max players from one VCT team; NULL = unlimited
+  free_transfers   INTEGER,                    -- free transfers before the -8pt penalty; NULL = unlimited (no penalty ever)
+  price_bands      JSONB,                      -- [{min:24,delta:0.3},...,{min:null,delta:-0.3}]; NULL = use the app's default table
   UNIQUE (tournament_id, matchday_number)
 );
 
@@ -59,17 +63,21 @@ ALTER TABLE matchdays ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "public_access" ON matchdays FOR ALL USING (true) WITH CHECK (true);
 
 -- Seed matchdays for Masters London
-INSERT INTO matchdays (tournament_id, matchday_number, label, phase, market_open)
+-- MD1 gets free_transfers = NULL (unlimited — building the initial squad costs nothing).
+-- Every other matchday starts at the same-team limit 2 / 2 free transfers; adjust per matchday in
+-- Admin > Matchdays as the season progresses (e.g. lift same_team_limit and raise free_transfers
+-- from a knockout round onward) — no code change or redeploy needed.
+INSERT INTO matchdays (tournament_id, matchday_number, label, phase, market_open, same_team_limit, free_transfers)
 VALUES
-  ('masters_london_2026', 1, 'MD 1', 'group',    TRUE),
-  ('masters_london_2026', 2, 'MD 2', 'group',    FALSE),
-  ('masters_london_2026', 3, 'MD 3', 'group',    FALSE),
-  ('masters_london_2026', 4, 'MD 4', 'group',    FALSE),
-  ('masters_london_2026', 5, 'MD 5', 'group',    FALSE),
-  ('masters_london_2026', 6, 'MD 6', 'group',    FALSE),
-  ('masters_london_2026', 7, 'MD 7 (KO)', 'knockout', FALSE),
-  ('masters_london_2026', 8, 'MD 8 (KO)', 'knockout', FALSE),
-  ('masters_london_2026', 9, 'Final',     'knockout', FALSE)
+  ('masters_london_2026', 1, 'MD 1', 'group',    TRUE,  2, NULL),
+  ('masters_london_2026', 2, 'MD 2', 'group',    FALSE, 2, 2),
+  ('masters_london_2026', 3, 'MD 3', 'group',    FALSE, 2, 2),
+  ('masters_london_2026', 4, 'MD 4', 'group',    FALSE, 2, 2),
+  ('masters_london_2026', 5, 'MD 5', 'group',    FALSE, 2, 2),
+  ('masters_london_2026', 6, 'MD 6', 'group',    FALSE, 2, 2),
+  ('masters_london_2026', 7, 'MD 7 (KO)', 'knockout', FALSE, 2, 2),
+  ('masters_london_2026', 8, 'MD 8 (KO)', 'knockout', FALSE, 2, 2),
+  ('masters_london_2026', 9, 'Final',     'knockout', FALSE, 2, 2)
 ON CONFLICT (tournament_id, matchday_number) DO NOTHING;
 
 

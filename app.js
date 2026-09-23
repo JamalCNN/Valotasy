@@ -1,5 +1,4 @@
 // ===== CONSTANTS =====
-const TIER_PRICE = {S:24,A:16,B:10,C:6};
 const CHIPS = [
   {id:'wildcard',  name:'Wildcard',       icon:'🃏',desc:'Unlimited free transfers for the entire Matchday — no penalty'},
   {id:'topfragger',name:'Top Fragger',    icon:'🎯',desc:'Top scorer in your squad gets ×2 automatically'},
@@ -144,7 +143,7 @@ let savedTransferCount = 0;
 let isDirty           = false;
 
 // UI state
-let pickerSlot = null, pickerFilter = 'ALL', pickerTierFilter = 'ALL', pickerPriceFilter = 'ALL', playersFilter = 'ALL', playersTierFilter = 'ALL', playersPriceFilter = 'ALL';
+let pickerSlot = null, pickerFilter = 'ALL', pickerPriceFilter = 'ALL', playersFilter = 'ALL', playersPriceFilter = 'ALL';
 
 // ===== MARKET LOCK =====
 function isMarketLocked(md){
@@ -181,7 +180,7 @@ async function seedPlayers(){
   if(PLAYERS.length) return;
   const rows = DEFAULT_PLAYERS.map(p=>({
     tournament_id:TOURNAMENT.id, name:p.name, vct_team:p.team,
-    role:p.role, tier:p.tier, price:p.price,
+    role:p.role, price:p.price,
   }));
   const {data} = await sb.from('players').insert(rows).select();
   if(data) PLAYERS = data;
@@ -880,7 +879,7 @@ function calcMyPts(){
 function openPicker(slotId,slotLabel){
   const curMD=MATCHDAYS.find(m=>m.id===currentMDId);
   if(isMarketLocked(curMD)){toast('Market is closed — changes not allowed');return;}
-  pickerSlot=slotId; pickerFilter='ALL'; pickerTierFilter='ALL'; pickerPriceFilter='ALL';
+  pickerSlot=slotId; pickerFilter='ALL'; pickerPriceFilter='ALL';
   document.getElementById('pickerTitle').textContent='Pick '+slotLabel;
   document.getElementById('pickerSearch').value='';
   document.querySelectorAll('#pickerModal .filter-btn').forEach((b,i)=>b.classList.toggle('on',i===0));
@@ -889,7 +888,6 @@ function openPicker(slotId,slotLabel){
 }
 function closePicker(){ document.getElementById('pickerModal').classList.remove('open'); pickerSlot=null; }
 function setFilter(f,el){ pickerFilter=f; document.querySelectorAll('#picker-role-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
-function setPickerTierFilter(f,el){ pickerTierFilter=f; document.querySelectorAll('#picker-tier-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
 function setPickerPriceFilter(f,el){ pickerPriceFilter=f; document.querySelectorAll('#picker-price-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPicker(); }
 
 // ── Per-matchday rules — admin-configurable in Admin > Matchdays, no code change or redeploy needed ──
@@ -921,7 +919,6 @@ function renderPicker(){
   const list=PLAYERS.filter(p=>{
     if(q&&!p.name.toLowerCase().includes(q)&&!p.vct_team.toLowerCase().includes(q)) return false;
     if(pickerFilter!=='ALL'&&p.role!==pickerFilter) return false;
-    if(pickerTierFilter!=='ALL'&&p.tier!==pickerTierFilter) return false;
     if(pickerPriceFilter!=='ALL'&&p.price>Number(pickerPriceFilter)) return false;
     return true;
   });
@@ -937,7 +934,6 @@ function renderPicker(){
         <div style="min-width:0"><div class="pr-name">${p.name}</div><div class="pr-vctt">${p.vct_team}</div></div>
       </div>
       <div class="pr-role">${p.role}</div>
-      <div class="pr-tier ${p.tier}">${p.tier}</div>
       <div class="pr-price">${p.price}M</div>
       <button class="pr-add" ${disabled?'disabled':''} onclick="pickPlayer(${p.id})">${alreadyIn?'In squad':teamFull?'Full':!roleOk?'✗':'Pick'}</button>
     </div>`;
@@ -1102,7 +1098,6 @@ function resetTeamToSaved(){ discardDraft(); }
 const ELIMINATED_TEAMS = new Set(); // Masters London teams cleared — add Champions Shanghai eliminations here as they happen
 
 function setPlayersFilter(f,el){ playersFilter=f; document.querySelectorAll('#role-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPlayersPage(); }
-function setPlayersTierFilter(f,el){ playersTierFilter=f; document.querySelectorAll('#tier-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPlayersPage(); }
 function setPlayersPriceFilter(f,el){ playersPriceFilter=f; document.querySelectorAll('#price-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPlayersPage(); }
 
 function renderPlayersPage(){
@@ -1110,7 +1105,6 @@ function renderPlayersPage(){
   const list=PLAYERS.filter(p=>{
     if(q&&!p.name.toLowerCase().includes(q)&&!p.vct_team.toLowerCase().includes(q)) return false;
     if(playersFilter!=='ALL'&&p.role!==playersFilter) return false;
-    if(playersTierFilter!=='ALL'&&p.tier!==playersTierFilter) return false;
     if(playersPriceFilter!=='ALL'&&p.price>Number(playersPriceFilter)) return false;
     return true;
   });
@@ -1130,7 +1124,6 @@ function renderPlayersPage(){
         <div class="pcard-name">${p.name}</div>
         <div class="pcard-team">${p.vct_team}</div>
       </div>
-      <span class="tag tag-${p.tier}">${p.tier}</span>
     </div>
   </div>`;
   }).join('')}
@@ -1914,16 +1907,18 @@ async function addPlayer(){
   const name=document.getElementById('aName').value.trim();
   if(!name){toast('Please enter a player name');return;}
   if(PLAYERS.find(p=>p.name.toLowerCase()===name.toLowerCase())){toast('Player already exists');return;}
-  const tier=document.getElementById('aTier').value;
+  const price=Number(document.getElementById('aPrice').value);
+  if(!Number.isFinite(price)||price<=0){toast('Please enter a valid price');return;}
   const {data:newPlayer,error}=await sb.from('players').insert({
     tournament_id:TOURNAMENT.id, name,
     vct_team:document.getElementById('aTeam').value,
     role:document.getElementById('aRole').value,
-    tier, price:TIER_PRICE[tier],
+    price,
   }).select().single();
   if(error){toast('Error adding player');return;}
   PLAYERS.push(newPlayer);
   document.getElementById('aName').value='';
+  document.getElementById('aPrice').value='';
   renderAdminPlayers(); toast(`${name} added ✓`);
 }
 
@@ -1936,7 +1931,6 @@ function renderAdminPlayers(){
     <div class="pla-row">
       <div>${p.name}<br><span style="color:var(--muted);font-size:10px">${p.vct_team}</span></div>
       <div><span class="tag tag-${roleTag[p.role]||'An'}">${p.role.slice(0,3)}</span></div>
-      <div><span class="tag tag-${p.tier}">${p.tier}</span></div>
       <div style="color:var(--accent);font-size:11px">${p.price}M</div>
       <div class="pla-actions">
         <button class="btn-sm btn-edit" onclick="openEdit(${p.id})">✏️</button>
@@ -1951,15 +1945,16 @@ function openEdit(id){
   document.getElementById('editName').value=p.name;
   document.getElementById('editTeam').value=p.vct_team;
   document.getElementById('editRole').value=p.role;
-  document.getElementById('editTier').value=p.tier;
+  document.getElementById('editPrice').value=p.price;
   document.getElementById('editModal').classList.add('open');
 }
 function closeEdit(){ document.getElementById('editModal').classList.remove('open'); }
 
 async function saveEdit(){
   const id=parseInt(document.getElementById('editId').value);
-  const tier=document.getElementById('editTier').value;
-  const updates={name:document.getElementById('editName').value.trim(),vct_team:document.getElementById('editTeam').value,role:document.getElementById('editRole').value,tier,price:TIER_PRICE[tier]};
+  const price=Number(document.getElementById('editPrice').value);
+  if(!Number.isFinite(price)||price<=0){toast('Please enter a valid price');return;}
+  const updates={name:document.getElementById('editName').value.trim(),vct_team:document.getElementById('editTeam').value,role:document.getElementById('editRole').value,price};
   await sb.from('players').update(updates).eq('id',id);
   const idx=PLAYERS.findIndex(p=>p.id===id);
   if(idx>=0) PLAYERS[idx]={...PLAYERS[idx],...updates};
@@ -2069,66 +2064,66 @@ function copySetupSQL(){ navigator.clipboard.writeText(SETUP_SQL).then(()=>toast
 
 // ===== DEFAULT PLAYERS (seed) =====
 const DEFAULT_PLAYERS=[
-  {name:'koshmaras',team:'Team Heretics',  role:'Controller',tier:'B',price:10},
-  {name:'Wo0t',    team:'Team Heretics',  role:'Initiator', tier:'B',price:10},
-  {name:'RieNs',   team:'Team Heretics',  role:'Duelist',   tier:'A',price:16},
-  {name:'benjyfishy',team:'Team Heretics',role:'Sentinel',  tier:'A',price:16},
-  {name:'Boo',     team:'Team Heretics',  role:'Controller',tier:'C',price:6},
-  {name:'Jamppi',  team:'Team Vitality',  role:'Initiator', tier:'B',price:10},
-  {name:'PROFEK',  team:'Team Vitality',  role:'Controller',tier:'C',price:6},
-  {name:'Derke',   team:'Team Vitality',  role:'Duelist',   tier:'S',price:24},
-  {name:'Chronicle',team:'Team Vitality', role:'Sentinel',  tier:'S',price:24},
-  {name:'Sayonara',team:'Team Vitality',  role:'Duelist',   tier:'S',price:24},
-  {name:'s0pp',    team:'FUT Esports',    role:'Duelist',   tier:'B',price:10},
-  {name:'xeus',    team:'FUT Esports',    role:'Initiator', tier:'C',price:6},
-  {name:'yetujey', team:'FUT Esports',    role:'Controller',tier:'C',price:6},
-  {name:'KROSTALY',team:'FUT Esports',    role:'Sentinel',  tier:'C',price:6},
-  {name:'sociablEE',team:'FUT Esports',   role:'Initiator', tier:'C',price:6},
-  {name:'kiNgg',   team:'Leviatán',       role:'Duelist',   tier:'A',price:16},
-  {name:'blowz',   team:'Leviatán',       role:'Initiator', tier:'B',price:10},
-  {name:'Sato',    team:'Leviatán',       role:'Controller',tier:'B',price:10},
-  {name:'spikeziN',team:'Leviatán',       role:'Sentinel',  tier:'B',price:10},
-  {name:'Neon',    team:'Leviatán',       role:'Controller',tier:'S',price:24},
-  {name:'BABYBAY', team:'G2 Esports',     role:'Duelist',   tier:'B',price:10},
-  {name:'valyn',   team:'G2 Esports',     role:'Initiator', tier:'B',price:10},
-  {name:'jawgemo', team:'G2 Esports',     role:'Controller',tier:'A',price:16},
-  {name:'leaf',    team:'G2 Esports',     role:'Sentinel',  tier:'A',price:16},
-  {name:'trent',   team:'G2 Esports',     role:'Initiator', tier:'S',price:24},
-  {name:'Ethan',   team:'NRG',            role:'Initiator', tier:'A',price:16},
-  {name:'keiko',   team:'NRG',            role:'Duelist',   tier:'B',price:10},
-  {name:'mada',    team:'NRG',            role:'Controller',tier:'B',price:10},
-  {name:'skuba',   team:'NRG',            role:'Sentinel',  tier:'B',price:10},
-  {name:'brawk',   team:'NRG',            role:'Duelist',   tier:'S',price:24},
-  {name:'Jinggg',  team:'Paper Rex',      role:'Duelist',   tier:'S',price:24},
-  {name:'f0rsakeN',team:'Paper Rex',      role:'Initiator', tier:'A',price:16},
-  {name:'d4v41',   team:'Paper Rex',      role:'Controller',tier:'B',price:10},
-  {name:'something',team:'Paper Rex',     role:'Sentinel',  tier:'S',price:24},
-  {name:'invy',    team:'Paper Rex',      role:'Duelist',   tier:'C',price:6},
-  {name:'nobody',  team:'EDward Gaming',  role:'Duelist',   tier:'B',price:10},
-  {name:'ZmjjKK',  team:'EDward Gaming',  role:'Initiator', tier:'S',price:24},
-  {name:'Smoggy',  team:'EDward Gaming',  role:'Controller',tier:'A',price:16},
-  {name:'CHICHOO', team:'EDward Gaming',  role:'Sentinel',  tier:'A',price:16},
-  {name:'cb',      team:'EDward Gaming',  role:'Initiator', tier:'C',price:6},
-  {name:'WsLeo',   team:'XLG Esports',   role:'Duelist',   tier:'B',price:10},
-  {name:'Rarga',   team:'XLG Esports',   role:'Initiator', tier:'C',price:6},
-  {name:'NoMan',   team:'XLG Esports',   role:'Controller',tier:'C',price:6},
-  {name:'Lysoar',  team:'XLG Esports',   role:'Sentinel',  tier:'C',price:6},
-  {name:'happywei',team:'XLG Esports',   role:'Duelist',   tier:'S',price:24},
-  {name:'vo0kashu',team:'Dragon Ranger Gaming',role:'Duelist',  tier:'A',price:16},
-  {name:'Life',    team:'Dragon Ranger Gaming',role:'Initiator',tier:'C',price:6},
-  {name:'Nicc',    team:'Dragon Ranger Gaming',role:'Controller',tier:'C',price:6},
-  {name:'SpiritZ1',team:'Dragon Ranger Gaming',role:'Sentinel', tier:'C',price:6},
-  {name:'Flex1n',  team:'Dragon Ranger Gaming',role:'Controller',tier:'C',price:6},
-  {name:'PatMen',  team:'Global Esports', role:'Duelist',   tier:'B',price:10},
-  {name:'Wronski', team:'Global Esports', role:'Initiator', tier:'C',price:6},
-  {name:'AAAY',    team:'Global Esports', role:'Controller',tier:'B',price:10},
-  {name:'TChomps', team:'Global Esports', role:'Sentinel',  tier:'C',price:6},
-  {name:'stellar', team:'Global Esports', role:'Initiator', tier:'C',price:6},
-  {name:'Crws',    team:'FULL SENSE',     role:'Duelist',   tier:'A',price:16},
-  {name:'JitboyS', team:'FULL SENSE',     role:'Initiator', tier:'B',price:10},
-  {name:'Primmie', team:'FULL SENSE',     role:'Controller',tier:'S',price:24},
-  {name:'Surf',    team:'FULL SENSE',     role:'Sentinel',  tier:'C',price:6},
-  {name:'ChAlalala',team:'FULL SENSE',    role:'Initiator', tier:'C',price:6},
+  {name:'koshmaras',team:'Team Heretics',  role:'Controller',price:10},
+  {name:'Wo0t',    team:'Team Heretics',  role:'Initiator', price:10},
+  {name:'RieNs',   team:'Team Heretics',  role:'Duelist',   price:16},
+  {name:'benjyfishy',team:'Team Heretics',role:'Sentinel',  price:16},
+  {name:'Boo',     team:'Team Heretics',  role:'Controller',price:6},
+  {name:'Jamppi',  team:'Team Vitality',  role:'Initiator', price:10},
+  {name:'PROFEK',  team:'Team Vitality',  role:'Controller',price:6},
+  {name:'Derke',   team:'Team Vitality',  role:'Duelist',   price:24},
+  {name:'Chronicle',team:'Team Vitality', role:'Sentinel',  price:24},
+  {name:'Sayonara',team:'Team Vitality',  role:'Duelist',   price:24},
+  {name:'s0pp',    team:'FUT Esports',    role:'Duelist',   price:10},
+  {name:'xeus',    team:'FUT Esports',    role:'Initiator', price:6},
+  {name:'yetujey', team:'FUT Esports',    role:'Controller',price:6},
+  {name:'KROSTALY',team:'FUT Esports',    role:'Sentinel',  price:6},
+  {name:'sociablEE',team:'FUT Esports',   role:'Initiator', price:6},
+  {name:'kiNgg',   team:'Leviatán',       role:'Duelist',   price:16},
+  {name:'blowz',   team:'Leviatán',       role:'Initiator', price:10},
+  {name:'Sato',    team:'Leviatán',       role:'Controller',price:10},
+  {name:'spikeziN',team:'Leviatán',       role:'Sentinel',  price:10},
+  {name:'Neon',    team:'Leviatán',       role:'Controller',price:24},
+  {name:'BABYBAY', team:'G2 Esports',     role:'Duelist',   price:10},
+  {name:'valyn',   team:'G2 Esports',     role:'Initiator', price:10},
+  {name:'jawgemo', team:'G2 Esports',     role:'Controller',price:16},
+  {name:'leaf',    team:'G2 Esports',     role:'Sentinel',  price:16},
+  {name:'trent',   team:'G2 Esports',     role:'Initiator', price:24},
+  {name:'Ethan',   team:'NRG',            role:'Initiator', price:16},
+  {name:'keiko',   team:'NRG',            role:'Duelist',   price:10},
+  {name:'mada',    team:'NRG',            role:'Controller',price:10},
+  {name:'skuba',   team:'NRG',            role:'Sentinel',  price:10},
+  {name:'brawk',   team:'NRG',            role:'Duelist',   price:24},
+  {name:'Jinggg',  team:'Paper Rex',      role:'Duelist',   price:24},
+  {name:'f0rsakeN',team:'Paper Rex',      role:'Initiator', price:16},
+  {name:'d4v41',   team:'Paper Rex',      role:'Controller',price:10},
+  {name:'something',team:'Paper Rex',     role:'Sentinel',  price:24},
+  {name:'invy',    team:'Paper Rex',      role:'Duelist',   price:6},
+  {name:'nobody',  team:'EDward Gaming',  role:'Duelist',   price:10},
+  {name:'ZmjjKK',  team:'EDward Gaming',  role:'Initiator', price:24},
+  {name:'Smoggy',  team:'EDward Gaming',  role:'Controller',price:16},
+  {name:'CHICHOO', team:'EDward Gaming',  role:'Sentinel',  price:16},
+  {name:'cb',      team:'EDward Gaming',  role:'Initiator', price:6},
+  {name:'WsLeo',   team:'XLG Esports',   role:'Duelist',   price:10},
+  {name:'Rarga',   team:'XLG Esports',   role:'Initiator', price:6},
+  {name:'NoMan',   team:'XLG Esports',   role:'Controller',price:6},
+  {name:'Lysoar',  team:'XLG Esports',   role:'Sentinel',  price:6},
+  {name:'happywei',team:'XLG Esports',   role:'Duelist',   price:24},
+  {name:'vo0kashu',team:'Dragon Ranger Gaming',role:'Duelist',  price:16},
+  {name:'Life',    team:'Dragon Ranger Gaming',role:'Initiator',price:6},
+  {name:'Nicc',    team:'Dragon Ranger Gaming',role:'Controller',price:6},
+  {name:'SpiritZ1',team:'Dragon Ranger Gaming',role:'Sentinel', price:6},
+  {name:'Flex1n',  team:'Dragon Ranger Gaming',role:'Controller',price:6},
+  {name:'PatMen',  team:'Global Esports', role:'Duelist',   price:10},
+  {name:'Wronski', team:'Global Esports', role:'Initiator', price:6},
+  {name:'AAAY',    team:'Global Esports', role:'Controller',price:10},
+  {name:'TChomps', team:'Global Esports', role:'Sentinel',  price:6},
+  {name:'stellar', team:'Global Esports', role:'Initiator', price:6},
+  {name:'Crws',    team:'FULL SENSE',     role:'Duelist',   price:16},
+  {name:'JitboyS', team:'FULL SENSE',     role:'Initiator', price:10},
+  {name:'Primmie', team:'FULL SENSE',     role:'Controller',price:24},
+  {name:'Surf',    team:'FULL SENSE',     role:'Sentinel',  price:6},
+  {name:'ChAlalala',team:'FULL SENSE',    role:'Initiator', price:6},
 ];
 
 // ===== INIT =====

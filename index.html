@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VALOTASY — Champions Shanghai 2026</title>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=9">
 <!-- Flatpickr date picker -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
@@ -80,9 +80,7 @@
             <div class="form-group"><label>Role</label>
               <select id="aRole"><option>Duelist</option><option>Initiator</option><option>Controller</option><option>Sentinel</option></select>
             </div>
-            <div class="form-group"><label>Tier</label>
-              <select id="aTier"><option value="S">S — Superstar (24M)</option><option value="A" selected>A — Starter (16M)</option><option value="B">B — Role Player (10M)</option><option value="C">C — Underdog (6M)</option></select>
-            </div>
+            <div class="form-group"><label>Price (M)</label><input id="aPrice" type="number" min="1" step="0.5" placeholder="16"></div>
             <button class="btn btn-red" onclick="addPlayer()" style="width:100%">Add Player</button>
           </div>
           <div class="admin-card">
@@ -144,9 +142,7 @@
     <div class="form-group"><label>Role</label>
       <select id="editRole"><option>Duelist</option><option>Initiator</option><option>Controller</option><option>Sentinel</option></select>
     </div>
-    <div class="form-group"><label>Tier</label>
-      <select id="editTier"><option value="S">S — Superstar (24M)</option><option value="A">A — Starter (16M)</option><option value="B">B — Role Player (10M)</option><option value="C">C — Underdog (6M)</option></select>
-    </div>
+    <div class="form-group"><label>Price (M)</label><input id="editPrice" type="number" min="1" step="0.5"></div>
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn btn-red" onclick="saveEdit()" style="flex:1">Save</button>
       <button class="btn btn-outline" onclick="closeEdit()">Cancel</button>
@@ -168,13 +164,6 @@
       <button class="filter-btn" onclick="setFilter('Initiator',this)">Initiator</button>
       <button class="filter-btn" onclick="setFilter('Controller',this)">Controller</button>
       <button class="filter-btn" onclick="setFilter('Sentinel',this)">Sentinel</button>
-    </div>
-    <div id="picker-tier-filters" class="modal-filters" style="margin-bottom:6px">
-      <button class="filter-btn on" onclick="setPickerTierFilter('ALL',this)">All Grades</button>
-      <button class="filter-btn" onclick="setPickerTierFilter('S',this)">S</button>
-      <button class="filter-btn" onclick="setPickerTierFilter('A',this)">A</button>
-      <button class="filter-btn" onclick="setPickerTierFilter('B',this)">B</button>
-      <button class="filter-btn" onclick="setPickerTierFilter('C',this)">C</button>
     </div>
     <div id="picker-price-filters" class="modal-filters">
       <button class="filter-btn on" onclick="setPickerPriceFilter('ALL',this)">All Prices</button>
@@ -268,13 +257,6 @@
       <button class="filter-btn" onclick="setPlayersFilter('Initiator',this)">Initiator</button>
       <button class="filter-btn" onclick="setPlayersFilter('Controller',this)">Controller</button>
       <button class="filter-btn" onclick="setPlayersFilter('Sentinel',this)">Sentinel</button>
-    </div>
-    <div id="tier-filters" class="modal-filters" style="margin-bottom:8px">
-      <button class="filter-btn on" onclick="setPlayersTierFilter('ALL',this)">All Grades</button>
-      <button class="filter-btn" onclick="setPlayersTierFilter('S',this)">S</button>
-      <button class="filter-btn" onclick="setPlayersTierFilter('A',this)">A</button>
-      <button class="filter-btn" onclick="setPlayersTierFilter('B',this)">B</button>
-      <button class="filter-btn" onclick="setPlayersTierFilter('C',this)">C</button>
     </div>
     <div id="price-filters" class="modal-filters" style="margin-bottom:16px">
       <button class="filter-btn on" onclick="setPlayersPriceFilter('ALL',this)">All Prices</button>
@@ -446,6 +428,6 @@ CREATE POLICY "public_access" ON users FOR ALL USING (true) WITH CHECK (true);</
   </div>
 </div>
 
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

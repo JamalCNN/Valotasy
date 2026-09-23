@@ -1,9 +1,14 @@
 # Player card images
 
-Put one image per player here (`.png`, `.webp` or `.jpg`).
+Put one image per player here. **Must be `.png`** — the app only looks for that extension.
 
-**Naming:** lowercase player name, spaces and symbols replaced with `-`, accents removed.
-Examples: `derke.png`, `zmjjkk.png`, `leviatan-neon.png` (when names clash, append the team).
+**Naming:** lowercase player name, accents stripped, everything else that isn't `a-z`/`0-9`
+replaced with `-` (matches `playerImgSlug()` in app.js exactly).
+Examples: `derke.png`, `zmjjkk.png`, `d-zed-o-brien.png`, `angel-nunez.png`
+(when two players' names slug to the same thing, append the team, e.g. `leviatan-neon.png`).
 
 Served as static files from the site root, e.g. `images/players/derke.png`.
-The UI does not use these yet.
+
+**Used automatically** by the Team page slots, the player picker, and the captain list
+(`playerAvatar()` in app.js) — no code change needed once a file lands here. Until a player's
+file exists, their avatar shows a role-colored circle with their initial instead.

@@ -15,6 +15,26 @@ const SLOTS = [
   {id:'any2',label:'Any',roles:['Duelist','Initiator','Controller','Sentinel']},
   {id:'any3',label:'Any',roles:['Duelist','Initiator','Controller','Sentinel']},
 ];
+const ROLE_COLOR = {Duelist:'#f87171',Initiator:'#60a5fa',Controller:'#a78bfa',Sentinel:'#34d399'};
+function roleColor(role){ return ROLE_COLOR[role]||'var(--muted)'; }
+
+// ── Player card images (uploaded later to images/players/) ────────
+// Filename convention: lowercase name, accents stripped, spaces/symbols -> '-'. See images/players/README.md.
+function playerImgSlug(name){
+  return (name||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+}
+function playerImgSrc(name){ return `images/players/${playerImgSlug(name)}.png`; }
+// Renders a small avatar: the player's photo if images/players/<slug>.png exists, else a
+// role-tinted circle with their initial. `size` in px.
+function playerAvatar(p, size){
+  const cls = size<=32 ? 'pcard-avatar sm' : 'pcard-avatar';
+  const c = roleColor(p.role);
+  return `<div class="${cls}" style="background:${c}22;border:0.5px solid ${c}44">
+    <span class="pcard-initial" style="color:${c}">${(p.name||'?').charAt(0).toUpperCase()}</span>
+    <img src="${playerImgSrc(p.name)}" alt="" onerror="this.style.display='none'" loading="lazy">
+  </div>`;
+}
 
 // ===== AUTH =====
 let currentUser = null; // {userId, manager}
@@ -662,8 +682,13 @@ function renderSlots(){
             <button onclick="event.stopPropagation();removePlayer('${sl.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;transition:.2s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
           </div>
           ${isCap?'<div class="cap-badge">C</div>':''}
-          <div class="slot-name" onclick="openPicker('${sl.id}','${sl.label}')" style="cursor:pointer">${p.name}</div>
-          <div class="slot-team" onclick="openPicker('${sl.id}','${sl.label}')" style="cursor:pointer">${p.vct_team} · <span class="tag tag-${p.tier}" style="font-size:8px">${p.tier}</span> · <span style="color:var(--accent)">${p.price}M</span></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:2px;min-width:0;cursor:pointer" onclick="openPicker('${sl.id}','${sl.label}')">
+            ${playerAvatar(p,44)}
+            <div style="min-width:0">
+              <div class="slot-name">${p.name}</div>
+              <div class="slot-team">${p.vct_team} · <span class="tag tag-${p.tier}" style="font-size:8px">${p.tier}</span> · <span style="color:var(--accent)">${p.price}M</span></div>
+            </div>
+          </div>
           <div class="slot-pts">${dispPts}</div>
         </div>`
       :`<div id="slot_${sl.id}" class="slot"
@@ -757,8 +782,11 @@ function renderCaptainList(){
   }
   el.innerHTML=filled.map(p=>{
     const isCap=myCaptainId===p.id, isCap2=myCaptain2Id===p.id;
-    return`<div style="padding:7px 10px;background:var(--s2);border:1px solid ${isCap||isCap2?'var(--gold)':'var(--border2)'};margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:.2s;border-radius:4px" onclick="setCaptain(${p.id})">
-      <span style="font-size:13px;font-weight:600">${p.name} <span style="color:var(--muted);font-size:10px">${p.vct_team}</span></span>
+    return`<div style="padding:7px 10px;background:var(--s2);border:1px solid ${isCap||isCap2?'var(--gold)':'var(--border2)'};margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;transition:.2s;border-radius:4px" onclick="setCaptain(${p.id})">
+      <span style="display:flex;align-items:center;gap:8px;min-width:0">
+        ${playerAvatar(p,28)}
+        <span style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name} <span style="color:var(--muted);font-size:10px">${p.vct_team}</span></span>
+      </span>
       ${isCap?'<span style="color:var(--gold);font-size:16px;font-weight:700">C</span>':isCap2?'<span style="color:var(--gold);font-size:14px;font-weight:700">C2</span>':'<span style="color:var(--muted);font-size:11px">Select</span>'}
     </div>`;
   }).join('');
@@ -894,7 +922,10 @@ function renderPicker(){
     const teamFull=(teamCount[p.vct_team]||0)>=limit&&!selectedIds.includes(p.id);
     const disabled=alreadyIn||!roleOk||teamFull;
     return`<div class="player-row">
-      <div><div class="pr-name">${p.name}</div><div class="pr-vctt">${p.vct_team}</div></div>
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        ${playerAvatar(p,28)}
+        <div style="min-width:0"><div class="pr-name">${p.name}</div><div class="pr-vctt">${p.vct_team}</div></div>
+      </div>
       <div class="pr-role">${p.role}</div>
       <div class="pr-tier ${p.tier}">${p.tier}</div>
       <div class="pr-price">${p.price}M</div>

@@ -14,7 +14,7 @@ nav{position:sticky;top:0;z-index:100;background:#0a0a10;border-bottom:1px solid
 
 /* LAYOUT */
 .page{display:none;min-height:calc(100vh - 52px);position:relative;z-index:1}.page.active{display:block}
-.container{max-width:960px;margin:0 auto;padding:28px 20px 80px}
+.container{max-width:1280px;margin:0 auto;padding:28px 20px 80px}
 
 /* HERO */
 .hero{text-align:center;padding:40px 20px 28px}
@@ -71,7 +71,7 @@ nav{position:sticky;top:0;z-index:100;background:#0a0a10;border-bottom:1px solid
 /* MY TEAM */
 .team-builder{display:grid;grid-template-columns:1fr 290px;gap:18px}
 @media(max-width:700px){.team-builder{grid-template-columns:1fr}}
-.slots-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.slots-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .slot{background:var(--s1);border:0.5px solid var(--border2);padding:10px;display:flex;flex-direction:column;gap:6px;position:relative;transition:all .2s;border-radius:4px}
 .slot:hover{border-color:rgba(255,70,85,0.3)}.slot.filled{border-color:rgba(255,70,85,0.25)}.slot.cap-slot{border-color:rgba(255,215,0,0.4)!important}
 .slot.drag-over{border-color:var(--accent)!important;background:rgba(0,255,255,0.06)!important;transition:none}

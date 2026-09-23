@@ -1099,7 +1099,7 @@ async function deleteMyTeam(){
 function resetTeamToSaved(){ discardDraft(); }
 
 // ===== PLAYERS PAGE =====
-const ELIMINATED_TEAMS = new Set(['Dragon Ranger Gaming','FULL SENSE','Global Esports','NRG']);
+const ELIMINATED_TEAMS = new Set(); // Masters London teams cleared — add Champions Shanghai eliminations here as they happen
 
 function setPlayersFilter(f,el){ playersFilter=f; document.querySelectorAll('#role-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPlayersPage(); }
 function setPlayersTierFilter(f,el){ playersTierFilter=f; document.querySelectorAll('#tier-filters .filter-btn').forEach(b=>b.classList.remove('on')); el.classList.add('on'); renderPlayersPage(); }

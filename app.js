@@ -1116,17 +1116,21 @@ function renderPlayersPage(){
   });
   const el=document.getElementById('playersGrid');
   if(!list.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:32px 0">No players found</div>';return;}
-  const roleColor={Duelist:'#f87171',Initiator:'#60a5fa',Controller:'#a78bfa',Sentinel:'#34d399'};
-  el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:10px">
+  el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px">
   ${list.map(p=>{
     const elim=ELIMINATED_TEAMS.has(p.vct_team);
-    return`<div class="card" style="padding:14px;${elim?'opacity:0.35;filter:grayscale(1)':''}">
-    <div style="font-size:9px;letter-spacing:1px;color:${elim?'var(--muted)':roleColor[p.role]||'#9ca3af'}">${p.role}</div>
-    <div style="font-size:15px;font-weight:700;margin-top:2px">${p.name}</div>
-    <div style="font-size:11px;color:var(--muted);margin-top:2px">${p.vct_team}${elim?' · <span style="color:#ef4444;font-size:9px;letter-spacing:1px">OUT</span>':''}</div>
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:10px">
+    const c=elim?'var(--muted)':roleColor(p.role);
+    return`<div class="pcard-photo" data-initial="${(p.name||'?').charAt(0).toUpperCase()}" style="background:${elim?'#9ca3af':c}18;color:${c};${elim?'filter:grayscale(1);opacity:0.55':''}">
+    <img src="${playerImgSrc(p.vct_team,p.name)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('pcard-noart');this.remove()">
+    <div class="pcard-badge pcard-badge-price">${p.price}M</div>
+    <div class="pcard-badge pcard-badge-role" style="color:${c};border-color:${c}66">${ROLE_SHORT[p.role]||p.role}</div>
+    ${elim?'<div class="pcard-cap" style="color:#ef4444;border-color:rgba(239,68,68,0.5)">OUT</div>':''}
+    <div class="pcard-bottom">
+      <div style="min-width:0">
+        <div class="pcard-name">${p.name}</div>
+        <div class="pcard-team">${p.vct_team}</div>
+      </div>
       <span class="tag tag-${p.tier}">${p.tier}</span>
-      <span style="font-size:12px;color:${elim?'var(--muted)':'var(--accent)'}">${p.price}M</span>
     </div>
   </div>`;
   }).join('')}

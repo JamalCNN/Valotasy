@@ -16,6 +16,7 @@ const SLOTS = [
   {id:'any3',label:'Any',roles:['Duelist','Initiator','Controller','Sentinel']},
 ];
 const ROLE_COLOR = {Duelist:'#f87171',Initiator:'#60a5fa',Controller:'#a78bfa',Sentinel:'#34d399'};
+const ROLE_SHORT = {Duelist:'DUE',Initiator:'INI',Controller:'CTR',Sentinel:'SEN'};
 function roleColor(role){ return ROLE_COLOR[role]||'var(--muted)'; }
 
 // ── Player card images (uploaded later to images/players/) ────────
@@ -669,8 +670,9 @@ function renderSlots(){
       :`${scoreData.total}`;
     const changed=savedRosters[sl.id]?.id!==p?.id;
     const pendingClass=changed?'slot-pending':'';
+    const c=p?roleColor(p.role):null;
     return p
-      ?`<div id="slot_${sl.id}" class="slot filled ${isCap?'cap-slot':''} ${pendingClass}"
+      ?`<div id="slot_${sl.id}" class="slot pcard-slot filled ${isCap?'cap-slot':''} ${pendingClass}"
           ondragover="slotDragOver(event,'${sl.id}')" ondragleave="slotDragLeave('${sl.id}')" ondrop="slotDrop(event,'${sl.id}')">
           <div class="slot-label" style="display:flex;justify-content:space-between;align-items:center">
             <span style="display:flex;align-items:center;gap:5px">
@@ -682,21 +684,28 @@ function renderSlots(){
             </span>
             <button onclick="event.stopPropagation();removePlayer('${sl.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;transition:.2s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
           </div>
-          ${isCap?'<div class="cap-badge">C</div>':''}
-          <div style="display:flex;align-items:center;gap:8px;margin-top:2px;min-width:0;cursor:pointer" onclick="openPicker('${sl.id}','${sl.label}')">
-            ${playerAvatar(p,44)}
-            <div style="min-width:0">
-              <div class="slot-name">${p.name}</div>
-              <div class="slot-team">${p.vct_team} · <span class="tag tag-${p.tier}" style="font-size:8px">${p.tier}</span> · <span style="color:var(--accent)">${p.price}M</span></div>
+          <div class="pcard-photo" data-initial="${(p.name||'?').charAt(0).toUpperCase()}" style="background:${c}18;color:${c}"
+            onclick="openPicker('${sl.id}','${sl.label}')">
+            <img src="${playerImgSrc(p.vct_team,p.name)}" alt="" loading="lazy"
+              onerror="this.parentElement.classList.add('pcard-noart');this.remove()">
+            <div class="pcard-badge pcard-badge-price">${p.price}M</div>
+            <div class="pcard-badge pcard-badge-role" style="color:${c};border-color:${c}66">${ROLE_SHORT[p.role]||p.role}</div>
+            ${isCap?'<div class="pcard-cap">C</div>':''}
+            <div class="pcard-bottom">
+              <div style="min-width:0">
+                <div class="pcard-name">${p.name}</div>
+                <div class="pcard-team">${p.vct_team}</div>
+              </div>
+              <div class="pcard-pts">${dispPts}</div>
             </div>
           </div>
-          <div class="slot-pts">${dispPts}</div>
         </div>`
-      :`<div id="slot_${sl.id}" class="slot"
-          onclick="openPicker('${sl.id}','${sl.label}')"
+      :`<div id="slot_${sl.id}" class="slot pcard-slot"
           ondragover="slotDragOver(event,'${sl.id}')" ondragleave="slotDragLeave('${sl.id}')" ondrop="slotDrop(event,'${sl.id}')">
           <div class="slot-label">${sl.label}</div>
-          <div class="slot-empty">+ Pick a player</div>
+          <div class="pcard-photo pcard-empty" onclick="openPicker('${sl.id}','${sl.label}')">
+            <div class="slot-empty">+ Pick a player</div>
+          </div>
         </div>`;
   }).join('');
 }

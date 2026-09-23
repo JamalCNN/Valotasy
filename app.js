@@ -19,20 +19,21 @@ const ROLE_COLOR = {Duelist:'#f87171',Initiator:'#60a5fa',Controller:'#a78bfa',S
 function roleColor(role){ return ROLE_COLOR[role]||'var(--muted)'; }
 
 // ── Player card images (uploaded later to images/players/) ────────
-// Filename convention: lowercase name, accents stripped, spaces/symbols -> '-'. See images/players/README.md.
-function playerImgSlug(name){
-  return (name||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
+// Filename convention: [team]-[player], each part lowercased with accents stripped and
+// everything else -> '-'. See images/players/README.md.
+function playerImgSlug(s){
+  return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
     .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
 }
-function playerImgSrc(name){ return `images/players/${playerImgSlug(name)}.png`; }
-// Renders a small avatar: the player's photo if images/players/<slug>.png exists, else a
-// role-tinted circle with their initial. `size` in px.
+function playerImgSrc(team, name){ return `images/players/${playerImgSlug(team)}-${playerImgSlug(name)}.png`; }
+// Renders a small avatar: the player's photo if images/players/<team>-<player>.png exists,
+// else a role-tinted circle with their initial. `size` in px.
 function playerAvatar(p, size){
   const cls = size<=32 ? 'pcard-avatar sm' : 'pcard-avatar';
   const c = roleColor(p.role);
   return `<div class="${cls}" style="background:${c}22;border:0.5px solid ${c}44">
     <span class="pcard-initial" style="color:${c}">${(p.name||'?').charAt(0).toUpperCase()}</span>
-    <img src="${playerImgSrc(p.name)}" alt="" onerror="this.style.display='none'" loading="lazy">
+    <img src="${playerImgSrc(p.vct_team,p.name)}" alt="" onerror="this.style.display='none'" loading="lazy">
   </div>`;
 }
 

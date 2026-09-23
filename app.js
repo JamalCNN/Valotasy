@@ -1120,7 +1120,7 @@ function showAdminContent(){
 
 function renderAdminMatchdays(){
   const el=document.getElementById('mdAdminList'); if(!el) return;
-  el.innerHTML=MATCHDAYS.map(md=>{
+  el.innerHTML=MATCHDAYS.map((md,idx)=>{
     const dlDisplay = md.deadline ? new Date(md.deadline).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
     const mdFixtures = FIXTURES.filter(f=>f.matchday_id===md.id);
 
@@ -1141,9 +1141,19 @@ function renderAdminMatchdays(){
     const allFixturesDone=mdFixtures.length>0&&mdFixtures.every(f=>f.status==='completed');
     return `
     <div style="padding:12px 0;border-bottom:0.5px solid var(--border2)">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+        <span style="font-size:9px;color:var(--muted);white-space:nowrap">#${md.matchday_number}</span>
+        <input id="lbl_${md.id}" value="${md.label||''}" placeholder="Label" style="font-size:12px;font-weight:600;width:130px;background:var(--s1);border:0.5px solid var(--border2);color:var(--text);padding:4px 8px;outline:none;border-radius:3px">
+        <select id="phase_${md.id}" style="font-size:10px;background:var(--s1);border:0.5px solid var(--border2);color:var(--muted);padding:4px 6px;outline:none;border-radius:3px">
+          <option value="group" ${md.phase!=='knockout'?'selected':''}>group</option>
+          <option value="knockout" ${md.phase==='knockout'?'selected':''}>knockout</option>
+        </select>
+        <button onclick="saveMDIdentity(${md.id})" class="btn-sm btn-edit" style="font-size:9px">Save</button>
+        <button onclick="moveMatchday(${md.id},-1)" class="btn-sm" style="font-size:9px" title="Move earlier" ${idx===0?'disabled':''}>↑</button>
+        <button onclick="moveMatchday(${md.id},1)" class="btn-sm" style="font-size:9px" title="Move later" ${idx===MATCHDAYS.length-1?'disabled':''}>↓</button>
+        <button onclick="deleteMatchdayAdmin(${md.id})" class="btn-sm btn-del" style="font-size:9px;margin-left:auto" title="Delete matchday">🗑 Delete</button>
+      </div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-        <span style="font-size:12px;font-weight:600">${md.label}</span>
-        <span style="font-size:9px;color:var(--muted)">${md.phase}</span>
         <span style="font-size:9px;padding:2px 6px;border-radius:2px;background:${md.market_open?'rgba(74,222,128,0.15)':'rgba(255,70,85,0.1)'};color:${md.market_open?'#4ade80':'var(--red)'}">${md.market_open?'OPEN':'LOCKED'}</span>
         ${md.scores_locked?`<span style="font-size:9px;padding:2px 6px;border-radius:2px;background:rgba(250,204,21,0.12);color:#facc15">📊 SCORES FINAL</span>`:''}
         <button onclick="setMarket(${md.id},${!md.market_open})" class="btn-sm ${md.market_open?'btn-del':'btn-edit'}" style="margin-left:auto">${md.market_open?'🔒 Lock':'🔓 Open'}</button>
@@ -1215,6 +1225,83 @@ function renderAdminMatchdays(){
       disableMobile: false, theme: 'dark',
     });
   });
+}
+
+// ── Matchday identity (label / phase / order / add / delete) ─────
+async function saveMDIdentity(mdId){
+  const label=document.getElementById('lbl_'+mdId)?.value.trim();
+  const phase=document.getElementById('phase_'+mdId)?.value;
+  if(!label){ toast('Label cannot be empty'); return; }
+  await sb.from('matchdays').update({label, phase}).eq('id',mdId);
+  const md=MATCHDAYS.find(m=>m.id===mdId);
+  if(md){ md.label=label; md.phase=phase; }
+  renderAdminMatchdays();
+  renderLB();
+  if(currentUser) renderTeamPage();
+  toast('Matchday updated ✓');
+}
+
+// Swaps matchday_number with the adjacent matchday (dir: -1 = earlier, +1 = later).
+// Uses a transient -1 to avoid violating the (tournament_id, matchday_number) unique constraint mid-swap.
+async function moveMatchday(mdId, dir){
+  const idx=MATCHDAYS.findIndex(m=>m.id===mdId);
+  const swapIdx=idx+dir;
+  if(idx<0||swapIdx<0||swapIdx>=MATCHDAYS.length) return;
+  const a=MATCHDAYS[idx], b=MATCHDAYS[swapIdx];
+  const aNum=a.matchday_number, bNum=b.matchday_number;
+  await sb.from('matchdays').update({matchday_number:-1}).eq('id',a.id);
+  await sb.from('matchdays').update({matchday_number:aNum}).eq('id',b.id);
+  await sb.from('matchdays').update({matchday_number:bNum}).eq('id',a.id);
+  a.matchday_number=bNum; b.matchday_number=aNum;
+  MATCHDAYS.sort((x,y)=>x.matchday_number-y.matchday_number);
+  const openMD=[...MATCHDAYS].reverse().find(m=>m.market_open);
+  currentMDId=openMD?.id||MATCHDAYS[MATCHDAYS.length-1]?.id||null;
+  renderAdminMatchdays();
+  renderLB();
+  toast('Matchday order updated ✓');
+}
+
+async function addMatchday(){
+  if(!TOURNAMENT) return;
+  const newNum=(MATCHDAYS.length?Math.max(...MATCHDAYS.map(m=>m.matchday_number)):0)+1;
+  const {data,error}=await sb.from('matchdays').insert({
+    tournament_id:TOURNAMENT.id, matchday_number:newNum, label:'MD '+newNum, phase:'group',
+    market_open:false, same_team_limit:2, free_transfers:2,
+  }).select().single();
+  if(error||!data){ toast('Could not add matchday'); console.error(error); return; }
+  MATCHDAYS.push(data);
+  renderAdminMatchdays();
+  renderLB();
+  toast('Matchday added ✓ — rename it and use ↑/↓ to reorder');
+}
+
+// Deletes a matchday and, via schema cascades, everything tied to it (fixtures, transfers,
+// active_chips, matchday_scores, score_logs, predictions) — so this is blocked whenever any
+// of that data already exists, rather than silently destroying it.
+async function deleteMatchdayAdmin(mdId){
+  const md=MATCHDAYS.find(m=>m.id===mdId); if(!md) return;
+  if(MATCHDAYS.length<=1){ toast("Can't delete the only matchday"); return; }
+  const fixtureCount=FIXTURES.filter(f=>f.matchday_id===mdId).length;
+  const [{count:txCount},{count:chipCount},{count:scoreCount}] = await Promise.all([
+    sb.from('transfers').select('*',{count:'exact',head:true}).eq('matchday_id',mdId),
+    sb.from('active_chips').select('*',{count:'exact',head:true}).eq('matchday_id',mdId),
+    sb.from('matchday_scores').select('*',{count:'exact',head:true}).eq('matchday_id',mdId),
+  ]);
+  if(fixtureCount>0||txCount>0||chipCount>0||scoreCount>0){
+    toast(`Can't delete ${md.label} — it has ${fixtureCount} fixture(s), ${txCount||0} transfer(s), ${chipCount||0} chip pick(s) and ${scoreCount||0} score row(s). Remove those first.`, 5000);
+    return;
+  }
+  const confirmed=await showConfirm('Delete Matchday', `Delete "${md.label}"? This cannot be undone.`, 'Delete');
+  if(!confirmed) return;
+  await sb.from('matchdays').delete().eq('id',mdId);
+  MATCHDAYS=MATCHDAYS.filter(m=>m.id!==mdId);
+  if(currentMDId===mdId){
+    const openMD=[...MATCHDAYS].reverse().find(m=>m.market_open);
+    currentMDId=openMD?.id||MATCHDAYS[MATCHDAYS.length-1]?.id||null;
+  }
+  renderAdminMatchdays();
+  renderLB();
+  toast('Matchday deleted ✓');
 }
 
 // ── Matchday Rules editor (same-team limit / free transfers) ─────

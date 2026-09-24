@@ -265,7 +265,7 @@ function subscribeRealtime(){
       for(const rp of Object.values(savedRosters)){ if(rp?.id===updated.id) rp.price=updated.price; }
       const active=document.querySelector('.page.active');
       if(active?.id==='page-team') renderSlots();
-      if(active?.id==='page-players') renderPlayers?.();
+      if(active?.id==='page-players') renderPlayersPage();
     })
     .on('postgres_changes',{event:'*',schema:'public',table:'fixtures'},(payload)=>{
       const ev=payload.eventType;
@@ -1491,6 +1491,16 @@ function formatBands(bands){
   }).join(' · ');
 }
 
+// Appends a row to player_price_history so past prices aren't lost when
+// previous_price gets overwritten by the next change. Fire-and-forget —
+// never blocks or throws on the caller if the table isn't set up yet.
+function logPriceChange(playerId, oldPrice, newPrice, matchdayId){
+  if(oldPrice===newPrice) return;
+  sb.from('player_price_history').insert({
+    player_id: playerId, old_price: oldPrice, new_price: newPrice, matchday_id: matchdayId||null,
+  }).then(({error})=>{ if(error) console.warn('logPriceChange failed (run the player_price_history SQL setup):', error.message); });
+}
+
 async function updatePlayerPrices(mdId){
   const btn = document.getElementById('priceBtn_'+mdId);
   if(btn) btn.textContent = 'Updating...';
@@ -1548,6 +1558,7 @@ async function updatePlayerPrices(mdId){
     const capped = newPrice === p.price + d ? '' : ' [CAPPED]';
     log.push(`${p.name}: pts=${score} delta=${d>=0?'+':''}${d} ${p.price}M→${newPrice}M${capped}`);
     await sb.from('players').update({previous_price: p.price, price: newPrice}).eq('id', p.id);
+    logPriceChange(p.id, p.price, newPrice, mdId);
     const localP = PLAYERS.find(pl=>pl.id===p.id);
     if(localP) localP.price = newPrice;
     // Keep myRosters in sync so sell price uses current price, not stale load price
@@ -1954,8 +1965,10 @@ async function saveEdit(){
   const id=parseInt(document.getElementById('editId').value);
   const price=Number(document.getElementById('editPrice').value);
   if(!Number.isFinite(price)||price<=0){toast('Please enter a valid price');return;}
+  const oldPrice=PLAYERS.find(p=>p.id===id)?.price;
   const updates={name:document.getElementById('editName').value.trim(),vct_team:document.getElementById('editTeam').value,role:document.getElementById('editRole').value,price};
   await sb.from('players').update(updates).eq('id',id);
+  if(oldPrice!==undefined) logPriceChange(id, oldPrice, price, null);
   const idx=PLAYERS.findIndex(p=>p.id===id);
   if(idx>=0) PLAYERS[idx]={...PLAYERS[idx],...updates};
   renderAdminPlayers(); closeEdit(); toast('Updated ✓');

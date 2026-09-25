@@ -584,7 +584,7 @@ async function expandTeam(expId, teamId){
       const entry=slotMap[sl.id]; if(!entry) continue;
       const meta=playerMeta[entry.player_id]||{};
       const isTF=tfPlayerIds.has(entry.player_id);
-      const rawMatches=entry.matches.map(m=>m.raw);
+      const rawMatches=entry.matches.map(m=>m.raw).filter(v=>v!==0);
       const ptsLabel=rawMatches.length>1?`[${rawMatches.join(', ')}] = ${entry.total}`:`${entry.total}`;
       chips.innerHTML+=`<div class="pc ${entry.is_captain?'cap':''}" style="${isTF?'border-color:rgba(255,185,0,0.5);background:rgba(255,185,0,0.07)':''}">
         <div class="pc-role">${meta.role||sl.label}</div>
@@ -664,8 +664,9 @@ function renderSlots(){
     const p=myRosters[sl.id];
     const isCap=p&&(myCaptainId===p.id||myCaptain2Id===p.id);
     const scoreData=p?mySlotScores[p.id]||{total:0,matches:[]}:{total:0,matches:[]};
-    const dispPts=scoreData.matches.length>1
-      ?`[${scoreData.matches.map(m=>m.raw).join(', ')}] = ${scoreData.total}`
+    const rawMatches=scoreData.matches.map(m=>m.raw).filter(v=>v!==0);
+    const dispPts=rawMatches.length>1
+      ?`[${rawMatches.join(', ')}] = ${scoreData.total}`
       :`${scoreData.total}`;
     const changed=savedRosters[sl.id]?.id!==p?.id;
     const pendingClass=changed?'slot-pending':'';

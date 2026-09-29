@@ -305,6 +305,10 @@ function resolveConfirm(result){
 
 // ===== DRAFT STATE HELPERS =====
 
+// Rounds to cents (0.01M) to avoid floating-point noise (e.g. 14 - 13.2 = 0.7999999999999998)
+// leaking into displayed budgets or, worse, getting persisted into teams.budget_adjustment.
+function round2(n){ return Math.round(n*100)/100; }
+
 // Budget adjustment from original players truly removed from squad (not just rearranged)
 function calcDraftBudgetAdj(){
   const currentIds=new Set(Object.values(myRosters).map(p=>p?.id).filter(Boolean));
@@ -315,7 +319,7 @@ function calcDraftBudgetAdj(){
     const bp=savedBuyPrices[sl.id]||orig.price;
     adj-=(bp-Math.min(bp,orig.price)); // deduct realized loss (0 if price rose)
   }
-  return adj;
+  return round2(adj);
 }
 
 // Total transfers for this MD including unsaved draft picks
@@ -332,7 +336,7 @@ function calcDraftTransfers(){
 function getDraftBudget(){
   const budget=TOURNAMENT?.budget||100;
   const used=Object.values(myBuyPrices).reduce((s,v)=>s+(v||0),0);
-  return budget-used+calcDraftBudgetAdj()+myAdminBudgetAdj;
+  return round2(budget-used+calcDraftBudgetAdj()+myAdminBudgetAdj);
 }
 
 // ===== PAGE NAV =====

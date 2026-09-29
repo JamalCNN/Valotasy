@@ -365,6 +365,16 @@ Deno.serve(async (req) => {
       const chipMap: Record<string, string> = {};
       for (const c of (allChips ?? [])) chipMap[c.team_id] = c.chip_name;
 
+      // Current captain per team — the settled decision, not whatever was
+      // stamped on individual score_logs rows at the moment each match was scraped
+      // (a captain set/changed mid-matchday would otherwise leave earlier rows unflagged).
+      const { data: teamCaptains } = await sb.from("teams")
+        .select("id, captain_id, captain2_id").in("id", teamIds);
+      const captainMap: Record<string, { captainId: number | null; captain2Id: number | null }> = {};
+      for (const t of (teamCaptains ?? [])) {
+        captainMap[t.id] = { captainId: t.captain_id, captain2Id: t.captain2_id };
+      }
+
       // Transfer penalties
       const { data: penaltyTransfers } = await sb.from("transfers")
         .select("team_id").eq("matchday_id", matchday_id).eq("penalty_applied", true);
@@ -385,9 +395,10 @@ Deno.serve(async (req) => {
           .eq("team_id", teamId).eq("matchday_id", matchday_id);
         if (!mdLogs?.length) continue;
 
-        // Step 1: Reset all final_pts to raw_pts
+        // Step 1: Reset all final_pts to raw_pts and clear is_captain so it can be
+        // recomputed below against the team's current, settled captain choice.
         for (const log of mdLogs) {
-          await sb.from("score_logs").update({ final_pts: log.raw_pts }).eq("id", log.id);
+          await sb.from("score_logs").update({ final_pts: log.raw_pts, is_captain: false }).eq("id", log.id);
         }
 
         // Step 2: Apply chip/captain multiplier
@@ -409,11 +420,17 @@ Deno.serve(async (req) => {
             console.log(`  [finalize] Team ${teamId}: topfragger player_id=${topPlayerId} rating=${topRating}`);
           }
         } else {
-          // Captain multiplier: ×3 for triplecap, ×2 for all others
+          // Captain multiplier: ×3 for triplecap, ×2 for all others.
+          // Match against the team's current captain_id/captain2_id rather than the
+          // per-row is_captain flag, since that flag only reflects who was captain
+          // at the moment each individual match happened to be scraped.
           const mult = chip === "triplecap" ? 3 : 2;
-          const captainLogs = mdLogs.filter((l: any) => l.is_captain);
+          const caps = captainMap[teamId] ?? { captainId: null, captain2Id: null };
+          const captainLogs = mdLogs.filter((l: any) =>
+            l.player_id === caps.captainId || l.player_id === caps.captain2Id
+          );
           for (const log of captainLogs) {
-            await sb.from("score_logs").update({ final_pts: log.raw_pts * mult }).eq("id", log.id);
+            await sb.from("score_logs").update({ final_pts: log.raw_pts * mult, is_captain: true }).eq("id", log.id);
           }
           console.log(`  [finalize] Team ${teamId}: chip=${chip ?? "none"} captain ×${mult} (${captainLogs.length} rows)`);
         }
@@ -618,15 +635,19 @@ Deno.serve(async (req) => {
         const isCaptain2 = team.captain2Id === playerId;
         const isAnyCaptain = isCaptain || isCaptain2;
 
-        // Captain/chip multipliers are applied in the Finalize step after all matches are scored.
-        // During match scoring we only store raw_pts; final_pts = raw_pts here.
+        // Apply the captain multiplier immediately using the team's current captain,
+        // so the score is correct right after this match is scored rather than only
+        // after a separate Finalize click. topfragger stays deferred to Finalize since
+        // it needs every match in the matchday to know who had the highest rating —
+        // and per the scoring rules it does not stack with the captain multiplier.
+        const applyCaptainNow = isAnyCaptain && team.chip !== "topfragger";
         const { rawPts } = calculateScore(
           { kills: d.kills, k4: d.k4, k5: d.k5, k6: d.k6, k7: d.k7,
             clutch_1v2: d.clutch1v2, clutch_1v3: d.clutch1v3, clutch_1v4: d.clutch1v4, clutch_1v5: d.clutch1v5,
             is_winner: d.isWinner, clean_sheet_win: d.cleanSheetWin },
           rank, isLowest, false, null
         );
-        const finalPts = rawPts;
+        const finalPts = applyCaptainNow ? rawPts * (team.chip === "triplecap" ? 3 : 2) : rawPts;
         teamRaw += finalPts;
 
         // Build and store per-player breakdown
@@ -634,7 +655,7 @@ Deno.serve(async (req) => {
           { kills: d.kills, k4: d.k4, k5: d.k5, k6: d.k6, k7: d.k7,
             clutch_1v2: d.clutch1v2, clutch_1v3: d.clutch1v3, clutch_1v4: d.clutch1v4, clutch_1v5: d.clutch1v5,
             is_winner: d.isWinner, clean_sheet_win: d.cleanSheetWin },
-          rank, isLowest, false, null
+          rank, isLowest, applyCaptainNow, team.chip
         );
         calcLog.teams[teamId].players.push({ playerName, slot, playerId, isCaptain: isAnyCaptain, ...bd });
         console.log(
@@ -644,7 +665,7 @@ Deno.serve(async (req) => {
           `clutch=${bd.clutchTotal}(${bd.clutchPts}pt)`,
           `ratingRank=${rank}(${bd.ratingPts}pt)${isLowest ? " LOWEST(-3)" : ""}`,
           `win=${d.isWinner}(${bd.winPts}pt) cs=${d.cleanSheetWin}(${bd.cleanSheetPts}pt)`,
-          `→ raw=${rawPts} (chip/captain multiplier deferred to Finalize)`
+          `→ raw=${rawPts} final=${finalPts}${team.chip === "topfragger" ? " (topfragger resolved at Finalize)" : ""}`
         );
 
         scoreLogs.push({

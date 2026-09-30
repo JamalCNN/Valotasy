@@ -14,7 +14,7 @@ const SLOTS = [
   {id:'any2',label:'Any',roles:['Duelist','Initiator','Controller','Sentinel']},
   {id:'any3',label:'Any',roles:['Duelist','Initiator','Controller','Sentinel']},
 ];
-const ROLE_COLOR = {Duelist:'#f87171',Initiator:'#60a5fa',Controller:'#a78bfa',Sentinel:'#34d399'};
+const ROLE_COLOR = {Duelist:'#d4424f',Initiator:'#3a78e0',Controller:'#7b5ce0',Sentinel:'#1f9d6b'};
 const ROLE_SHORT = {Duelist:'DUE',Initiator:'INI',Controller:'CTR',Sentinel:'SEN'};
 function roleColor(role){ return ROLE_COLOR[role]||'var(--muted)'; }
 
@@ -340,19 +340,24 @@ function getDraftBudget(){
 }
 
 // ===== PAGE NAV =====
-function goPage(id){
+const PAGE_ORDER=['lb','team','players','rules','schedule','predict'];
+const REDUCED_MOTION=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let _pageBusy=false;
+function moveNavInd(){
+  const t=document.querySelector('.nav-tab.active'), ind=document.getElementById('navInd');
+  if(!t||!ind) return;
+  ind.style.width=t.offsetWidth+'px'; ind.style.transform=`translateX(${t.offsetLeft}px)`;
+}
+function setActiveTab(id){
+  document.querySelectorAll('.nav-tab').forEach((t,i)=>t.classList.toggle('active',PAGE_ORDER[i]===id));
+  moveNavInd();
+}
+// Re-trigger the staggered .rise animations on a page that is being shown
+function replayPageAnim(el){ el.classList.remove('active'); void el.offsetWidth; el.classList.add('active'); }
+function showPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
-  const map={lb:0,team:1,players:2,rules:3,schedule:4,predict:5};
-  document.querySelectorAll('.nav-tab')[map[id]].classList.add('active');
-  if((id==='team'||id==='predict')&&!currentUser){
-    showLogin();
-    document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
-    document.querySelectorAll('.nav-tab')[0].classList.add('active');
-    document.getElementById('page-lb').classList.add('active');
-    return;
-  }
-  document.getElementById('page-'+id).classList.add('active');
+  replayPageAnim(document.getElementById('page-'+id));
+  window.scrollTo(0,0);
   if(id==='lb'){ renderLB(); startCountdown(); }
   else stopCountdown();
   if(id==='team')     renderTeamPage();
@@ -361,6 +366,29 @@ function goPage(id){
   if(id==='schedule') renderSchedulePage();
   if(id==='predict')  renderPredictPage();
 }
+function goPage(id){
+  if((id==='team'||id==='predict')&&!currentUser){ showLogin(); return; }
+  const current=document.querySelector('.page.active')?.id;
+  setActiveTab(id);
+  if(current==='page-'+id){ showPage(id); return; }
+  if(REDUCED_MOTION||_pageBusy){ showPage(id); return; }
+  // Diagonal wipe: the page swaps while the panel covers the screen
+  _pageBusy=true;
+  const w=document.getElementById('wipe');
+  w.classList.remove('run'); void w.offsetWidth; w.classList.add('run');
+  setTimeout(()=>showPage(id),380);
+  setTimeout(()=>{_pageBusy=false;},820);
+}
+addEventListener('resize',moveNavInd);
+if(document.fonts) document.fonts.ready.then(moveNavInd);
+
+function toggleTheme(){
+  const root=document.documentElement;
+  const dark=root.dataset.theme?root.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme=dark?'light':'dark';
+  try{ localStorage.setItem('vlt_theme',root.dataset.theme); }catch(e){}
+}
+try{ const th=localStorage.getItem('vlt_theme'); if(th) document.documentElement.dataset.theme=th; }catch(e){}
 
 // ── Rules page: matchday-by-matchday rules table, built from live data ──
 function renderRulesPage(){
@@ -390,7 +418,7 @@ async function renderLB(){
   const mdIdsUpTo = MATCHDAYS.filter(m=>m.matchday_number<=(curMD?.matchday_number||0)).map(m=>m.id);
 
   const [{data:teams},{data:mdScores},{data:allScores},{data:chips}] = await Promise.all([
-    sb.from('teams').select('id,team_name,users!inner(manager_name)').eq('tournament_id',TOURNAMENT.id),
+    sb.from('teams').select('id,team_name,captain_id,users!inner(manager_name)').eq('tournament_id',TOURNAMENT.id),
     sb.from('matchday_scores').select('team_id,net_points').eq('matchday_id',lbMDId),
     mdIdsUpTo.length
       ? sb.from('matchday_scores').select('team_id,net_points').in('matchday_id',mdIdsUpTo)
@@ -414,6 +442,7 @@ async function renderLB(){
     <div class="stat-box"><div class="stat-lbl">Teams</div><div class="stat-val">${sorted.length||0}</div></div>
     <div class="stat-box"><div class="stat-lbl">Matchday</div><div class="stat-val">${curMD?.label||'—'}</div></div>`;
 
+  renderHeroCards(sorted, curMD);
   renderLBDeadline();
   const body = document.getElementById('lbBody');
   if(!sorted.length){
@@ -429,19 +458,45 @@ async function renderLB(){
     const chipObj = chipId?CHIPS.find(c=>c.id===chipId):null;
     const hiClass = mdPts===topMD&&topMD>0?'hi':'';
     return `
-    <div class="lb-row ${gc}" style="animation-delay:${i*.05}s" onclick="expandTeam('exp${i}','${t.id}')">
-      <div class="rank-n">${i+1}</div>
+    <div class="lb-row ${gc}" style="animation-delay:${i*.045}s" onclick="expandTeam('exp${i}','${t.id}')">
+      <div class="rank-n">${String(i+1).padStart(2,'0')}</div>
       <div class="team-col"><div class="team-nm">${t.team_name}</div><div class="team-mgr">${t.users?.manager_name||''}</div></div>
-      <div class="pts-big c">${cumul}</div>
-      <div class="pts-md c ${hiClass}">${mdPts>=0?'+':''}${mdPts}</div>
-      <div class="chip-col">${!marketOpen&&chipObj?`<span title="${chipObj.name}">${chipObj.icon}</span>`:'<span style="color:var(--muted);font-size:11px">—</span>'}</div>
-      <div class="mv c" style="color:var(--muted)">—</div>
+      <div class="pts-big r">${cumul}</div>
+      <div class="pts-md r ${hiClass}">${mdPts>=0?'+':''}${mdPts}</div>
+      <div class="chip-col">${!marketOpen&&chipObj?`<span class="chip-dot">${chipObj.name}</span>`:'—'}</div>
     </div>
     <div class="lb-expand" id="exp${i}">
       <div style="text-align:center;padding:16px;font-size:12px;color:var(--muted);font-family:monospace;letter-spacing:1px">
         ${marketOpen?'Click to view squad':'🔒 Squad revealed after deadline'}
       </div>
     </div>`;
+  }).join('');
+}
+
+// Home hero: the three most-captained players once squads are revealed, otherwise the three priciest
+function renderHeroCards(teams, md){
+  const el=document.getElementById('heroCards'); if(!el) return;
+  const revealed=isMarketLocked(md);
+  let picks=[];
+  if(revealed){
+    const n={};
+    for(const t of teams) if(t.captain_id) n[t.captain_id]=(n[t.captain_id]||0)+1;
+    picks=Object.entries(n).sort((a,b)=>b[1]-a[1]).slice(0,3)
+      .map(([id,c])=>({p:PLAYERS.find(x=>x.id===+id),note:`${Math.round(c/teams.length*100)}% captain`})).filter(x=>x.p);
+  }
+  const tag=picks.length?'Most captained':'Priciest';
+  if(!picks.length) picks=[...PLAYERS].sort((a,b)=>b.price-a.price).slice(0,3).map(p=>({p,note:`${p.price}M · ${p.vct_team}`}));
+  if(!picks.length){ el.innerHTML=''; return; }
+  // Put the top pick in the middle
+  const order=picks.length===3?[picks[1],picks[0],picks[2]]:picks;
+  el.innerHTML=order.map((x,i)=>{
+    const mid=x===picks[0], c=roleColor(x.p.role);
+    return `<figure class="hcard rise ${mid?'mid':''}" style="--i:${mid?2:i+3}">
+      <div class="ph" data-initial="${(x.p.name||'?').charAt(0).toUpperCase()}" style="background:${c}22;color:${c}">
+        <img src="${playerImgSrc(x.p.vct_team,x.p.name)}" alt="${x.p.name}, ${x.p.vct_team}" onerror="this.parentElement.classList.add('pcard-noart');this.remove()">
+        ${mid?`<span class="tag">${tag.toUpperCase()}</span>`:''}
+      </div>
+      <figcaption><b>${x.p.name}</b><span>${x.note}</span></figcaption></figure>`;
   }).join('');
 }
 
@@ -494,9 +549,9 @@ function renderLBDeadline(){
 
   // Colour shifts red as deadline approaches (< 1 hour)
   const urgent = diff < 3600000;
-  const color  = urgent ? 'var(--red)' : 'var(--accent)';
-  const bg     = urgent ? 'rgba(255,70,85,0.06)' : 'rgba(0,212,255,0.06)';
-  const border = urgent ? 'rgba(255,70,85,0.25)' : 'rgba(0,212,255,0.2)';
+  const color  = urgent ? 'var(--accent-ink)' : 'var(--ink)';
+  const bg     = urgent ? 'rgba(255,70,85,0.06)' : 'var(--tint)';
+  const border = urgent ? 'rgba(255,70,85,0.25)' : 'var(--line)';
 
   const deadlineStr = target.toLocaleString('en-GB',{
     day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'
@@ -608,9 +663,11 @@ async function expandTeam(expId, teamId){
 async function renderTeamPage(){
   if(!currentUser){ showLogin(); return; }
   document.getElementById('myTeamName').value  = myTeamName||'';
+  document.getElementById('crumbTeam').textContent = myTeamName||'My Team';
   document.getElementById('myManagerName').value = currentUser.manager||'';
   const curMD = MATCHDAYS.find(m=>m.id===currentMDId);
   const locked = isMarketLocked(curMD);
+  document.getElementById('crumbMD').textContent = curMD?.label||'MD';
   document.getElementById('lockBanner').innerHTML = locked
     ? '<div class="lock-banner">🔒 Market is closed — transfers not allowed</div>' : '';
   renderDeadlineBanner(curMD);
@@ -626,7 +683,9 @@ async function renderTeamPage(){
   const confirmBtn=document.getElementById('confirmBtn');
   const saveInfo=document.getElementById('saveInfo');
   if(discardBtn) discardBtn.style.display=isDirty?'':'none';
-  if(confirmBtn){ confirmBtn.textContent=isDirty?'✓ Confirm & Save':'✓ Save Team'; confirmBtn.classList.toggle('btn-accent',isDirty); }
+  if(confirmBtn) confirmBtn.textContent=isDirty?'Confirm & save':'Save team';
+  const dirtyBar=document.getElementById('dirtyBar');
+  if(dirtyBar) dirtyBar.hidden=!isDirty;
   if(saveInfo) saveInfo.textContent=isDirty?'Unsaved changes':'All changes saved';
 }
 
@@ -637,7 +696,7 @@ function renderDeadlineBanner(curMD){
   if(diff<=0){el.innerHTML='<div class="lock-banner">⏰ Deadline has passed</div>';return;}
   const h=Math.floor(diff/3600000),m=Math.floor((diff%3600000)/60000),d=Math.floor(h/24);
   const label=d>0?`${d}d ${h%24}h ${m}m`:`${h}h ${m}m`;
-  el.innerHTML=`<div style="background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.2);padding:10px 16px;font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:12px;display:flex;align-items:center;gap:8px;border-radius:4px">⏰ Deadline: <strong>${new Date(dl).toLocaleString('th-TH')}</strong> · Time left: <strong>${label}</strong></div>`;
+  el.innerHTML=`<div class="deadline-line">Deadline ${new Date(dl).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})} ·<b>${label}</b> left</div>`;
 }
 
 function renderTransferInfo(curMD, locked){
@@ -647,10 +706,10 @@ function renderTransferInfo(curMD, locked){
   const penalty=TOURNAMENT?.transfer_penalty||8;
   const used=calcDraftTransfers();
   if(unlimited){
-    tlEl.innerHTML='<span style="color:#4ade80">♾️ Unlimited transfers</span>';
+    tlEl.innerHTML='<span style="color:var(--good)">♾️ Unlimited transfers</span>';
     document.getElementById('penaltyPts').textContent='-0 pts';
   } else if(isWildcardActive){
-    tlEl.innerHTML=`Transfers this MD: <span style="color:#4ade80">${used}</span> &nbsp;<span style="color:#4ade80">🃏 Wildcard — no penalty</span>`;
+    tlEl.innerHTML=`Transfers this MD: <span style="color:var(--good)">${used}</span> &nbsp;<span style="color:var(--good)">🃏 Wildcard — no penalty</span>`;
     document.getElementById('penaltyPts').textContent='-0 pts';
   } else {
     const free=freeTransfersForMD(curMD);
@@ -663,55 +722,57 @@ function renderTransferInfo(curMD, locked){
 
 let dragSlot=null;
 
+function slotHTML(sl,i){
+  const p=myRosters[sl.id];
+  const drop=`ondragover="slotDragOver(event,'${sl.id}')" ondragleave="slotDragLeave('${sl.id}')" ondrop="slotDrop(event,'${sl.id}')"`;
+  if(!p) return `<div id="slot_${sl.id}" class="slot rise" style="--i:${i+5}" ${drop}>
+      <div class="ph pcard-empty" onclick="openPicker('${sl.id}','${sl.label}')" role="button" tabindex="0" aria-label="Pick ${sl.label}">
+        <div class="slot-empty"><b>+</b>Pick ${sl.label}</div>
+      </div>
+      <div class="pinfo"><div><b style="color:var(--muted)">${sl.label}</b><small>Empty slot</small></div></div>
+    </div>`;
+  const isCap1=myCaptainId===p.id, isCap2=myCaptain2Id===p.id, isCap=isCap1||isCap2;
+  const mult=myChip==='triplecap'?3:2;
+  const scoreData=mySlotScores[p.id]||{total:0,matches:[]};
+  const rawMatches=scoreData.matches.map(m=>m.raw).filter(v=>v!==0);
+  const multi=rawMatches.length>1;
+  const dispPts=multi?`[${rawMatches.join(', ')}] = ${scoreData.total}`:`${scoreData.total}`;
+  const changed=savedRosters[sl.id]?.id!==p?.id;
+  const c=roleColor(p.role);
+  const roleLbl=sl.label==='Any'?`Any · ${ROLE_SHORT[p.role]||p.role}`:sl.label;
+  const capUI=isCap
+    ?`<span class="cap-badge">${isCap2?'C2':'C'} ×${mult}</span>`
+    :(myChip==='topfragger'?'':`<button class="make-cap" onclick="event.stopPropagation();setCaptain(${p.id})">Make captain</button>`);
+  return `<div id="slot_${sl.id}" class="slot rise filled ${isCap?'cap-slot':''} ${changed?'slot-pending':''}" style="--i:${i+5}" ${drop}>
+    <div class="card3d">
+      <div class="ph" data-initial="${(p.name||'?').charAt(0).toUpperCase()}" style="background:${c}22;color:${c}" onclick="openPicker('${sl.id}','${sl.label}')">
+        <img src="${playerImgSrc(p.vct_team,p.name)}" alt="${p.name}, ${p.vct_team}" loading="lazy" onerror="this.parentElement.classList.add('pcard-noart');this.remove()">
+        <span class="role-tag"><span class="dot" style="background:${c}"></span>${roleLbl}</span>
+        ${capUI}
+      </div>
+    </div>
+    <div class="pinfo"><div><b>${p.name}</b><small>${p.vct_team} · ${p.price}M</small></div><div class="pts ${multi?'multi':''}">${dispPts}</div></div>
+    <div class="slot-tools">
+      <span class="drag-handle" draggable="true" ondragstart="slotDragStart(event,'${sl.id}')" ondragend="slotDragEnd(event,'${sl.id}')" title="Drag to rearrange">⠿</span>
+      <button onclick="event.stopPropagation();removePlayer('${sl.id}')">Remove</button>
+    </div>
+  </div>`;
+}
+
 function renderSlots(){
-  document.getElementById('slotsGrid').innerHTML=SLOTS.map(sl=>{
-    const p=myRosters[sl.id];
-    const isCap=p&&(myCaptainId===p.id||myCaptain2Id===p.id);
-    const scoreData=p?mySlotScores[p.id]||{total:0,matches:[]}:{total:0,matches:[]};
-    const rawMatches=scoreData.matches.map(m=>m.raw).filter(v=>v!==0);
-    const dispPts=rawMatches.length>1
-      ?`[${rawMatches.join(', ')}] = ${scoreData.total}`
-      :`${scoreData.total}`;
-    const changed=savedRosters[sl.id]?.id!==p?.id;
-    const pendingClass=changed?'slot-pending':'';
-    const c=p?roleColor(p.role):null;
-    return p
-      ?`<div id="slot_${sl.id}" class="slot pcard-slot filled ${isCap?'cap-slot':''} ${pendingClass}"
-          ondragover="slotDragOver(event,'${sl.id}')" ondragleave="slotDragLeave('${sl.id}')" ondrop="slotDrop(event,'${sl.id}')">
-          <div class="slot-label" style="display:flex;justify-content:space-between;align-items:center">
-            <span style="display:flex;align-items:center;gap:5px">
-              <span class="drag-handle" draggable="true"
-                ondragstart="slotDragStart(event,'${sl.id}')"
-                ondragend="slotDragEnd(event,'${sl.id}')"
-                title="Drag to rearrange">⠿</span>
-              ${sl.label}
-            </span>
-            <button onclick="event.stopPropagation();removePlayer('${sl.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;transition:.2s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
-          </div>
-          <div class="pcard-photo" data-initial="${(p.name||'?').charAt(0).toUpperCase()}" style="background:${c}18;color:${c}"
-            onclick="openPicker('${sl.id}','${sl.label}')">
-            <img src="${playerImgSrc(p.vct_team,p.name)}" alt="" loading="lazy"
-              onerror="this.parentElement.classList.add('pcard-noart');this.remove()">
-            <div class="pcard-badge pcard-badge-price">${p.price}M</div>
-            <div class="pcard-badge pcard-badge-role" style="color:${c};border-color:${c}66">${ROLE_SHORT[p.role]||p.role}</div>
-            ${isCap?'<div class="pcard-cap">C</div>':''}
-            <div class="pcard-bottom">
-              <div style="min-width:0">
-                <div class="pcard-name">${p.name}</div>
-                <div class="pcard-team">${p.vct_team}</div>
-              </div>
-              <div class="pcard-pts">${dispPts}</div>
-            </div>
-          </div>
-        </div>`
-      :`<div id="slot_${sl.id}" class="slot pcard-slot"
-          ondragover="slotDragOver(event,'${sl.id}')" ondragleave="slotDragLeave('${sl.id}')" ondrop="slotDrop(event,'${sl.id}')">
-          <div class="slot-label">${sl.label}</div>
-          <div class="pcard-photo pcard-empty" onclick="openPicker('${sl.id}','${sl.label}')">
-            <div class="slot-empty">+ Pick a player</div>
-          </div>
-        </div>`;
-  }).join('');
+  document.getElementById('slotsMain').innerHTML=SLOTS.slice(0,4).map((sl,i)=>slotHTML(sl,i)).join('');
+  document.getElementById('slotsAny').innerHTML=SLOTS.slice(4).map((sl,i)=>slotHTML(sl,i+5)).join('');
+  // Gentle 3D tilt that follows the pointer
+  if(REDUCED_MOTION) return;
+  document.querySelectorAll('#page-team .slot.filled').forEach(s=>{
+    const card=s.querySelector('.card3d'); if(!card) return;
+    s.addEventListener('pointermove',e=>{
+      if(e.pointerType!=='mouse') return;
+      const r=s.getBoundingClientRect(), x=(e.clientX-r.left)/r.width-.5, y=(e.clientY-r.top)/r.height-.5;
+      card.style.transform=`rotateY(${x*12}deg) rotateX(${-y*12}deg) translateY(-4px)`;
+    });
+    s.addEventListener('pointerleave',()=>{ card.style.transform=''; });
+  });
 }
 
 function slotDragStart(e,slotId){
@@ -763,7 +824,7 @@ async function slotDrop(e,targetId){
   }
   isDirty=true;
   renderTeamPage();
-  toast('Squad updated ✓');
+  toast('Squad updated');
 }
 
 async function removePlayer(slotId){
@@ -786,24 +847,20 @@ async function removePlayer(slotId){
   toast('Player removed');
 }
 
+// Captain is picked on the cards; this writes the one-line summary under the squad
 function renderCaptainList(){
-  const el=document.getElementById('captainList');
+  const el=document.getElementById('teamStatement'); if(!el) return;
   const filled=SLOTS.map(sl=>myRosters[sl.id]).filter(Boolean);
-  if(!filled.length){el.innerHTML='<div style="font-size:11px;color:var(--muted)">Pick players first</div>';return;}
-  if(myChip==='topfragger'){
-    el.innerHTML='<div style="padding:10px;background:var(--s2);border:1px solid rgba(255,185,0,0.3);border-radius:4px;font-size:12px;color:var(--gold);text-align:center">🎯 Captain auto-assigned after matchday<br><span style="color:var(--muted);font-size:10px">Highest Rating player gets ×2</span></div>';
+  const mult=myChip==='triplecap'?3:2;
+  if(!filled.length){ el.innerHTML='Pick your players, then hover a card and choose <em>Make captain</em>.'; return; }
+  if(myChip==='topfragger'){ el.innerHTML='<em>Top Fragger</em> is on. Your highest scorer gets ×2 automatically after the matchday.'; return; }
+  const c1=filled.find(p=>p.id===myCaptainId), c2=filled.find(p=>p.id===myCaptain2Id);
+  if(myChip==='clonecap'){
+    el.innerHTML=c1||c2?`<em>${[c1,c2].filter(Boolean).map(p=>p.name).join(' and ')}</em> ${c1&&c2?'both score':'scores'} ×2 with Clone Captain.${c1&&c2?'':' Pick one more captain.'}`
+      :'Clone Captain is on. Pick two captains on the cards above.';
     return;
   }
-  el.innerHTML=filled.map(p=>{
-    const isCap=myCaptainId===p.id, isCap2=myCaptain2Id===p.id;
-    return`<div style="padding:7px 10px;background:var(--s2);border:1px solid ${isCap||isCap2?'var(--gold)':'var(--border2)'};margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;transition:.2s;border-radius:4px" onclick="setCaptain(${p.id})">
-      <span style="display:flex;align-items:center;gap:8px;min-width:0">
-        ${playerAvatar(p,28)}
-        <span style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name} <span style="color:var(--muted);font-size:10px">${p.vct_team}</span></span>
-      </span>
-      ${isCap?'<span style="color:var(--gold);font-size:16px;font-weight:700">C</span>':isCap2?'<span style="color:var(--gold);font-size:14px;font-weight:700">C2</span>':'<span style="color:var(--muted);font-size:11px">Select</span>'}
-    </div>`;
-  }).join('');
+  el.innerHTML=c1?`<em>${c1.name}</em> is your captain and scores ×${mult} this matchday.`:'No captain yet. Hover a card and choose <em>Make captain</em>.';
 }
 
 async function setCaptain(pid){
@@ -825,11 +882,11 @@ function renderChipList(){
   document.getElementById('chipList').innerHTML=CHIPS.map(c=>{
     const isSelected=myChip===c.id;
     const isUsed=myUsedChips.has(c.id);
-    return`<div class="chip-item ${isSelected?'selected':''}" onclick="selectChip('${c.id}')" style="${isUsed?'opacity:0.4;pointer-events:none;filter:grayscale(1)':''}">
-      <div class="chip-icon">${c.icon}</div>
-      <div class="chip-info"><div class="chip-nm">${c.name}</div><div class="chip-desc">${c.desc}</div></div>
-      ${isSelected?'<div style="font-size:9px;color:var(--gold)">ON</div>':isUsed?'<div style="font-size:9px;color:var(--muted)">USED</div>':''}
-    </div>`;
+    const tag=isSelected?'Active':isUsed?'Used':'Available';
+    return`<button class="ccard ${isSelected?'selected':''} ${isUsed?'used':''}" onclick="selectChip('${c.id}')" ${isUsed?'disabled':''} title="${c.desc}">
+      <span class="t">${tag}</span><b>${c.name}</b><span class="d">${c.desc}</span>
+      <span class="go"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></svg></span>
+    </button>`;
   }).join('');
 }
 
@@ -851,7 +908,7 @@ async function selectChip(id){
   } else if(myChip!=='clonecap'){
     myCaptain2Id=null; await sb.from('teams').update({captain2_id:null}).eq('id',myTeamId);
   }
-  renderChipList(); renderCaptainList(); calcMyPts();
+  renderChipList(); renderSlots(); renderCaptainList(); calcMyPts();
 }
 
 function calcBudget(){
@@ -859,7 +916,7 @@ function calcBudget(){
   const budget=TOURNAMENT?.budget||100;
   const el=document.getElementById('budgetLeft');
   const tot=document.getElementById('budgetTotal');
-  el.textContent=left+'M'; el.style.color=left<0?'var(--red)':'var(--accent)';
+  el.textContent=left+'M'; el.style.color=left<0?'var(--accent-ink)':'var(--ink)';
   if(tot) tot.textContent='/'+budget+'M';
   return left;
 }
@@ -1055,7 +1112,7 @@ function renderChangesPanel(){
     if(orig?.id===curr?.id) continue; // no change for this slot
     const isTransfer=curr&&!savedIds.has(curr.id);
     const outLabel=orig?`<span style="color:var(--red)">${orig.name}</span>`:'<span style="color:var(--muted)">empty</span>';
-    const inLabel=curr?`<span style="color:#4ade80">${curr.name}</span>`:'<span style="color:var(--muted)">removed</span>';
+    const inLabel=curr?`<span style="color:var(--good)">${curr.name}</span>`:'<span style="color:var(--muted)">removed</span>';
     const badge=isTransfer&&!unlimited&&!isWildcard?'<span style="font-size:9px;background:rgba(255,70,85,0.15);color:var(--red);padding:1px 5px;border-radius:3px;margin-left:4px">TRANSFER</span>':'';
     rows.push(`<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">
       <span style="font-size:9px;color:var(--muted);width:32px;flex-shrink:0">${sl.label}</span>
@@ -1070,7 +1127,7 @@ function renderChangesPanel(){
   const txStr=unlimited?'Unlimited — free':`${draftTx}/${freeTx}${extra>0?` <span style="color:var(--red)">+${extra} penalty (-${extra*penalty}pts)</span>`:''}`;
 
   el.style.display='block';
-  el.innerHTML=`<div style="background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.15);border-radius:6px;padding:12px 16px;margin-bottom:10px">
+  el.innerHTML=`<div style="background:var(--tint);border:1px solid var(--line);border-radius:6px;padding:12px 16px;margin-bottom:10px">
     <div style="font-size:10px;font-weight:600;letter-spacing:1.5px;color:var(--accent);margin-bottom:8px">PENDING CHANGES</div>
     ${rows.length?rows.join(''):'<div style="font-size:12px;color:var(--muted)">Only slot rearrangements — no transfers</div>'}
     <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--muted)">
@@ -1115,22 +1172,18 @@ function renderPlayersPage(){
   });
   const el=document.getElementById('playersGrid');
   if(!list.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:32px 0">No players found</div>';return;}
-  el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px">
-  ${list.map(p=>{
+  el.innerHTML=`<div class="pgrid">
+  ${list.map((p,i)=>{
     const elim=ELIMINATED_TEAMS.has(p.vct_team);
-    const c=elim?'var(--muted)':roleColor(p.role);
-    return`<div class="pcard-photo" data-initial="${(p.name||'?').charAt(0).toUpperCase()}" style="background:${elim?'#9ca3af':c}18;color:${c};${elim?'filter:grayscale(1);opacity:0.55':''}">
-    <img src="${playerImgSrc(p.vct_team,p.name)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('pcard-noart');this.remove()">
-    <div class="pcard-badge pcard-badge-price">${p.price}M</div>
-    <div class="pcard-badge pcard-badge-role" style="color:${c};border-color:${c}66">${ROLE_SHORT[p.role]||p.role}</div>
-    ${elim?'<div class="pcard-cap" style="color:#ef4444;border-color:rgba(239,68,68,0.5)">OUT</div>':''}
-    <div class="pcard-bottom">
-      <div style="min-width:0">
-        <div class="pcard-name">${p.name}</div>
-        <div class="pcard-team">${p.vct_team}</div>
+    const c=roleColor(p.role);
+    return`<div class="pitem ${elim?'out':''}" style="--i:${Math.min(i,24)}">
+      <div class="ph" data-initial="${(p.name||'?').charAt(0).toUpperCase()}" style="background:${c}22;color:${c}">
+        <img src="${playerImgSrc(p.vct_team,p.name)}" alt="${p.name}, ${p.vct_team}" loading="lazy" onerror="this.parentElement.classList.add('pcard-noart');this.remove()">
+        <span class="role-tag"><span class="dot" style="background:${c}"></span>${p.role}</span>
+        ${elim?'<span class="cap-badge">OUT</span>':''}
       </div>
-    </div>
-  </div>`;
+      <div class="pinfo"><div><b>${p.name}</b><small>${p.vct_team}</small></div><div class="price">${p.price}M</div></div>
+    </div>`;
   }).join('')}
   </div>`;
 }
@@ -1171,10 +1224,10 @@ function renderAdminMatchdays(){
       const timeStr = fx.scheduled_time ? new Date(fx.scheduled_time).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : 'TBD';
       const done = fx.status==='completed';
       const bo=fx.best_of||3;
-      return `<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:0.5px solid rgba(255,255,255,0.04);flex-wrap:wrap">
+      return `<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:0.5px solid var(--tint);flex-wrap:wrap">
         <span style="font-size:12px;font-weight:600;flex:1;min-width:140px">${fx.team_a} <span style="color:var(--muted);font-weight:400">vs</span> ${fx.team_b} <span style="color:var(--muted);font-size:10px">· ${timeStr}</span></span>
-        <span style="font-size:9px;padding:2px 6px;border-radius:2px;white-space:nowrap;background:${bo===5?'rgba(255,185,0,0.12)':'rgba(255,255,255,0.05)'};color:${bo===5?'var(--gold)':'var(--muted)'};font-weight:600">BO${bo}</span>
-        <span style="font-size:9px;padding:2px 6px;border-radius:2px;white-space:nowrap;background:${done?'rgba(74,222,128,0.12)':'rgba(255,255,255,0.05)'};color:${done?'#4ade80':'var(--muted)'}">${done?'SCORED':'SCHEDULED'}</span>
+        <span style="font-size:9px;padding:2px 6px;border-radius:2px;white-space:nowrap;background:${bo===5?'rgba(255,185,0,0.12)':'var(--tint)'};color:${bo===5?'var(--gold)':'var(--muted)'};font-weight:600">BO${bo}</span>
+        <span style="font-size:9px;padding:2px 6px;border-radius:2px;white-space:nowrap;background:${done?'color-mix(in srgb,var(--good) 14%,transparent)':'var(--tint)'};color:${done?'var(--good)':'var(--muted)'}">${done?'SCORED':'SCHEDULED'}</span>
         <input id="fx_url_${fx.id}" value="${fx.vlr_match_url||''}" placeholder="VLR.gg URL..." ${done?'disabled':''} style="background:var(--s2);border:0.5px solid var(--border2);color:var(--text);padding:4px 8px;font-size:11px;outline:none;border-radius:3px;width:180px;${done?'opacity:0.4':''}">
         <button onclick="scoreFixture(${fx.id},${md.id})" class="btn-sm ${done||md.scores_locked?'':'btn-edit'}" ${done||md.scores_locked?'disabled':''} style="${done||md.scores_locked?'opacity:0.4':''}">⚡</button>
         <button onclick="deleteFixture(${fx.id})" class="btn-sm btn-del">✕</button>
@@ -1197,10 +1250,10 @@ function renderAdminMatchdays(){
         <button onclick="deleteMatchdayAdmin(${md.id})" class="btn-sm btn-del" style="font-size:9px;margin-left:auto" title="Delete matchday">🗑 Delete</button>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-        <span style="font-size:9px;padding:2px 6px;border-radius:2px;background:${md.market_open?'rgba(74,222,128,0.15)':'rgba(255,70,85,0.1)'};color:${md.market_open?'#4ade80':'var(--red)'}">${md.market_open?'OPEN':'LOCKED'}</span>
+        <span style="font-size:9px;padding:2px 6px;border-radius:2px;background:${md.market_open?'color-mix(in srgb,var(--good) 16%,transparent)':'rgba(255,70,85,0.1)'};color:${md.market_open?'var(--good)':'var(--red)'}">${md.market_open?'OPEN':'LOCKED'}</span>
         ${md.scores_locked?`<span style="font-size:9px;padding:2px 6px;border-radius:2px;background:rgba(250,204,21,0.12);color:#facc15">📊 SCORES FINAL</span>`:''}
         <button onclick="setMarket(${md.id},${!md.market_open})" class="btn-sm ${md.market_open?'btn-del':'btn-edit'}" style="margin-left:auto">${md.market_open?'🔒 Lock':'🔓 Open'}</button>
-        <button onclick="lockMatchdayScores(${md.id},${!md.scores_locked})" class="btn-sm" style="font-size:9px;background:${md.scores_locked?'rgba(250,204,21,0.1)':'rgba(255,255,255,0.06)'};border:0.5px solid ${md.scores_locked?'rgba(250,204,21,0.3)':'var(--border2)'};color:${md.scores_locked?'#facc15':'var(--muted)'}">${md.scores_locked?'🔓 Unlock Scores':'📊 Lock Scores'}</button>
+        <button onclick="lockMatchdayScores(${md.id},${!md.scores_locked})" class="btn-sm" style="font-size:9px;background:${md.scores_locked?'rgba(250,204,21,0.1)':'var(--tint)'};border:0.5px solid ${md.scores_locked?'rgba(250,204,21,0.3)':'var(--border2)'};color:${md.scores_locked?'#facc15':'var(--muted)'}">${md.scores_locked?'🔓 Unlock Scores':'📊 Lock Scores'}</button>
         <button onclick="finalizeMatchday(${md.id})" class="btn-sm" style="font-size:9px;background:rgba(255,185,0,0.1);border:0.5px solid rgba(255,185,0,0.3);color:var(--gold);${allFixturesDone?'':'opacity:0.35;pointer-events:none'}" ${allFixturesDone?'':'disabled'}>🏁 Finalize</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:${dlDisplay?'4px':'8px'}">
@@ -1759,7 +1812,7 @@ async function renderPredictPage(){
         const predStr=pred?`${pred.score_a}-${pred.score_b}`:'No pick';
         const resultStr=hasResult?`${fx.result_a}-${fx.result_b}`:'TBD';
         const pts=pred?.points_earned;
-        const ptsColor=pts>0?'#4ade80':'var(--muted)';
+        const ptsColor=pts>0?'var(--good)':'var(--muted)';
         return `<div class="card" style="padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
           <div style="flex:1;min-width:140px">
             <div style="font-size:13px;font-weight:600">${fx.team_a} <span style="color:var(--muted);font-weight:400">vs</span> ${fx.team_b}</div>
@@ -1783,7 +1836,7 @@ async function renderPredictPage(){
         const sel=pred&&pred.score_a===s.a&&pred.score_b===s.b;
         return `<button onclick="setPredScore(${fx.id},${s.a},${s.b})"
           data-pred-fix="${fx.id}" data-sa="${s.a}" data-sb="${s.b}"
-          style="${sel?'background:var(--accent);color:#000;border-color:var(--accent);font-weight:700':'background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.4)'}"
+          style="${sel?'background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:700':'background:var(--tint);border:0.5px solid var(--line);color:var(--muted)'}"
           class="btn-sm">${s.a}-${s.b}</button>`;
       }).join('');
 
@@ -1817,7 +1870,7 @@ async function renderPredictPage(){
       <h1>VALO<span>TASY</span><br>PREDICT</h1>
       <div class="hero-sub">PREDICT MATCH SCORES · EARN BONUS POINTS</div>
     </div>
-    <div style="background:rgba(0,212,255,0.05);border:0.5px solid rgba(0,212,255,0.15);padding:10px 14px;border-radius:4px;font-size:11px;color:var(--muted);margin-bottom:16px;line-height:2">
+    <div style="background:var(--tint);border:0.5px solid var(--line);padding:10px 14px;border-radius:4px;font-size:11px;color:var(--muted);margin-bottom:16px;line-height:2">
       🎯 <strong style="color:var(--text)">Exact score</strong> → 3 pts + 1 pt per correct team score = up to <strong style="color:var(--accent)">5 pts</strong><br>
       ✅ <strong style="color:var(--text)">Correct winner</strong> → 1 pt + 1 pt per correct team score = up to <strong style="color:var(--accent)">3 pts</strong><br>
       ❌ Wrong winner → +1 pt per correct team score only &nbsp;·&nbsp;
@@ -1845,9 +1898,9 @@ function setPredScore(fxId, scoreA, scoreB){
   document.getElementById('pb_'+fxId).value=scoreB;
   document.querySelectorAll(`[data-pred-fix="${fxId}"]`).forEach(b=>{
     const isSelected = b.dataset.sa==scoreA && b.dataset.sb==scoreB;
-    b.style.background    = isSelected ? 'var(--accent)'              : 'rgba(255,255,255,0.04)';
-    b.style.color         = isSelected ? '#000'                       : 'rgba(255,255,255,0.4)';
-    b.style.borderColor   = isSelected ? 'var(--accent)'              : 'rgba(255,255,255,0.12)';
+    b.style.background    = isSelected ? 'var(--accent)'              : 'var(--tint)';
+    b.style.color         = isSelected ? 'var(--on-accent)'                       : 'var(--muted)';
+    b.style.borderColor   = isSelected ? 'var(--accent)'              : 'var(--line)';
     b.style.fontWeight    = isSelected ? '700'                        : '400';
   });
 }
@@ -1886,7 +1939,7 @@ async function submitPrediction(fxId, mdId){
 
 function renderSchedulePage(){
   const el=document.getElementById('scheduleContainer'); if(!el) return;
-  const statusColor={scheduled:'var(--muted)',live:'#4ade80',completed:'var(--accent)'};
+  const statusColor={scheduled:'var(--muted)',live:'var(--good)',completed:'var(--accent)'};
   const statusLabel={scheduled:'Upcoming',live:'LIVE',completed:'Completed'};
   const html=MATCHDAYS.map(md=>{
     const mdFixtures=FIXTURES.filter(f=>f.matchday_id===md.id);
@@ -1900,7 +1953,7 @@ function renderSchedulePage(){
           <div style="font-size:14px;font-weight:600">${fx.team_a} <span style="color:var(--muted);font-weight:400">vs</span> ${fx.team_b}</div>
           <div style="font-size:11px;color:var(--muted);margin-top:3px">⏰ ${timeStr}</div>
         </div>
-        <span style="font-size:9px;font-weight:600;letter-spacing:1px;padding:3px 8px;border-radius:2px;white-space:nowrap;background:${s==='completed'?'rgba(0,212,255,0.08)':s==='live'?'rgba(74,222,128,0.12)':'rgba(255,255,255,0.05)'};color:${statusColor[s]||'var(--muted)'}">${statusLabel[s]||'Upcoming'}</span>
+        <span style="font-size:9px;font-weight:600;letter-spacing:1px;padding:3px 8px;border-radius:2px;white-space:nowrap;background:${s==='completed'?'var(--tint)':s==='live'?'color-mix(in srgb,var(--good) 14%,transparent)':'var(--tint)'};color:${statusColor[s]||'var(--muted)'}">${statusLabel[s]||'Upcoming'}</span>
       </div>`;
     }).join(''):`<div style="font-size:12px;color:var(--muted);padding:8px 0">No fixtures scheduled yet</div>`;
     return `<div style="margin-bottom:28px">
@@ -2005,7 +2058,7 @@ function renderTeamListAdmin(){
       if(!teams?.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">No teams yet</div>';return;}
       el.innerHTML=teams.map(t=>{
         const adj=t.admin_budget_adj||0;
-        const adjLabel=adj>0?`<span style="color:#4ade80">+${adj}M</span>`:adj<0?`<span style="color:var(--red)">${adj}M</span>`:'';
+        const adjLabel=adj>0?`<span style="color:var(--good)">+${adj}M</span>`:adj<0?`<span style="color:var(--red)">${adj}M</span>`:'';
         return`<div style="padding:10px 0;border-bottom:0.5px solid var(--border2)">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
             <div>
@@ -2158,6 +2211,7 @@ async function init(){
   subscribeRealtime();
   renderLB();
   startCountdown();
+  moveNavInd();
 }
 
 init();

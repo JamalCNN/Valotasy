@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VALOTASY — Champions Shanghai 2026</title>
-<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=9">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;1,700;1,800&family=Barlow:wght@400;500;600;700&family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=10">
 <!-- Flatpickr date picker -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
@@ -23,24 +23,26 @@
     <button class="nav-tab" onclick="goPage('rules')">Rules</button>
     <button class="nav-tab" onclick="goPage('schedule')">Schedule</button>
     <button class="nav-tab" onclick="goPage('predict')">Predict</button>
+    <span class="nav-ind" id="navInd"></span>
   </div>
   <div class="nav-right">
     <div style="display:none;align-items:center;gap:8px" id="navUserBadge">
-      <div style="font-size:12px;font-weight:500;color:rgba(255,255,255,0.6);padding:6px 10px;background:var(--s2);border:0.5px solid var(--border2);border-radius:4px">👤 <span id="navUserName">—</span></div>
-      <button class="admin-btn" onclick="doLogout()" title="Log out" style="color:var(--red);border-color:rgba(255,70,85,0.3)">LOG OUT</button>
+      <span class="nav-user" id="navUserName">—</span>
+      <button class="admin-btn" onclick="doLogout()" title="Log out">LOG OUT</button>
     </div>
     <button class="admin-btn" id="adminToggle" onclick="toggleAdmin()">ADMIN</button>
+    <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" aria-label="Switch light or dark theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
   </div>
 </nav>
+<div class="wipe" id="wipe" aria-hidden="true"><i></i><i></i></div>
 
 <div class="toast" id="toast"></div>
 
 <!-- LOGIN OVERLAY -->
 <div class="login-overlay" id="loginOverlay">
   <div class="login-box">
-    <div style="font-size:32px;margin-bottom:12px">⚡</div>
-    <h2>VALO<span style="color:var(--red)">TASY</span></h2>
-    <p>Enter your name and 4-digit PIN<br><span style='color:rgba(255,255,255,0.3)'>Same name & PIN = same team on every device</span></p>
+    <h2>VALO<span style="color:var(--accent)">TASY</span></h2>
+    <p>Enter your name and 4-digit PIN<br><span style="color:var(--muted)">Same name & PIN = same team on every device</span></p>
     <div id="loginStep1">
       <input class="login-input" id="loginManager" placeholder="Your name (Manager)..." maxlength="30">
       <input class="login-input login-pin" id="loginPin" type="password" placeholder="PIN (4 digits)" maxlength="4" inputmode="numeric" pattern="[0-9]*">
@@ -59,10 +61,10 @@
     </div>
     <div style="overflow-y:auto;flex:1;padding:20px">
       <div id="adminLock" style="text-align:center;padding:40px 20px">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:3px;margin-bottom:16px">ADMIN ACCESS</div>
+        <div style="font-family:var(--display);font-style:italic;font-weight:800;font-size:32px;margin-bottom:16px">ADMIN ACCESS</div>
         <input type="password" id="adminPw" placeholder="Password..." style="background:var(--s2);border:1px solid var(--border2);color:var(--text);padding:10px 16px;font-size:14px;outline:none;width:240px;display:block;margin:0 auto 12px" onkeydown="if(event.key==='Enter')checkAdmin()">
         <button class="btn btn-red" onclick="checkAdmin()" style="margin-top:8px">Login</button>
-        <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);margin-top:8px">(default: 1234)</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">(default: 1234)</div>
       </div>
       <div id="adminContent" style="display:none">
         <div class="admin-grid">
@@ -182,87 +184,92 @@
 
 <!-- PAGE: LEADERBOARD -->
 <div class="page active" id="page-lb">
-  <div class="container">
-    <div class="hero">
-      <div class="event-tag">⚡ VCT 2026 — FANTASY LEAGUE</div>
-      <h1>VALO<span>TASY</span><br>CHAMPIONS SHANGHAI</h1>
-      <div class="hero-sub">LIVE LEADERBOARD · UPDATED AFTER EACH MATCHDAY</div>
+  <header class="home-hero">
+    <div class="home-hero-in">
+      <div>
+        <div class="label rise" style="--i:0">VCT 2026 · Champions Shanghai · Fantasy League</div>
+        <h1 class="wordmark"><span>Valo</span><span class="b">tasy</span></h1>
+        <p class="hero-lede rise" style="--i:3">Pick seven pros, name a captain, and score from every kill, clutch and win in Shanghai.</p>
+        <div class="hero-actions rise" style="--i:4">
+          <button class="btn btn-dark" onclick="goPage('team')">Pick your squad</button>
+        </div>
+      </div>
+      <div class="hero-cards" id="heroCards"></div>
     </div>
-    <div class="md-nav" id="lbMdNav"></div>
+  </header>
+  <div class="container">
+    <div class="sec-head rise" style="--i:6">
+      <div><div class="label">Updated after each matchday</div><h2 class="sec-title">Leaderboard</h2></div>
+      <div class="md-nav" id="lbMdNav" style="margin:0"></div>
+    </div>
     <div id="lbDeadlineBanner"></div>
     <div class="stats-strip" id="statsStrip"></div>
-    <div class="lb-head"><div class="c">#</div><div>Team</div><div class="c">Total</div><div class="c">This MD</div><div class="c">Chip</div></div>
+    <div class="lb-head"><div>#</div><div>Team</div><div class="r">Total</div><div class="r">This MD</div><div>Chip</div></div>
     <div id="lbBody"></div>
   </div>
 </div>
 
 <!-- PAGE: MY TEAM -->
 <div class="page" id="page-team">
-  <div class="container">
-    <div class="sec-title">My Team</div>
-    <div class="team-name-bar">
-      <div style="display:flex;flex-direction:column;gap:6px;flex:1">
-        <input id="myTeamName" placeholder="Team name..." oninput="saveMyTeam()" style="font-size:16px;font-weight:600">
-        <input id="myManagerName" placeholder="Manager name..." oninput="saveMyTeam()" style="font-size:12px;opacity:.6">
-      </div>
-      <div style="text-align:right;flex-shrink:0">
-        <div style="font-size:10px;font-weight:500;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase">Budget</div>
-        <div style="font-size:22px;font-weight:600;color:var(--accent)"><span id="budgetLeft">100</span><span style="color:var(--muted);font-size:14px;font-weight:400" id="budgetTotal">/100M</span></div>
-      </div>
+  <section class="stage">
+    <span class="hair v" style="left:14%"></span><span class="hair v" style="right:14%"></span>
+    <span class="hair h" style="top:330px"></span>
+    <span class="plus" style="left:14%;top:330px"></span><span class="plus" style="left:86%;top:330px"></span>
+    <div class="stage-notes">
+      <div class="tag-note rise" style="--i:3;left:calc(14% + 16px);top:268px">Budget left<b><span id="budgetLeft">100</span><span id="budgetTotal" style="font-size:15px;color:var(--muted);font-style:normal;font-weight:600">/100M</span></b></div>
+      <div class="tag-note rise" style="--i:3;right:calc(14% + 16px);top:268px;text-align:right">Score this MD<b><span id="myTotalPts">0</span> pts</b></div>
     </div>
-    <div id="deadlineBanner"></div>
-    <div id="lockBanner"></div>
-    <div class="transfer-info" id="transferInfo">
-      <span id="transferLabel">Transfers this MD: <span id="transferUsed">0</span>/2</span>
-      <span>Penalty: <span id="penaltyPts" style="color:var(--red)">-0 pts</span></span>
-    </div>
-    <div class="team-builder">
-      <div>
-        <div style="font-size:10px;font-weight:500;letter-spacing:1px;color:var(--muted);margin-bottom:10px;text-transform:uppercase">Click a slot to pick a player · Same-team limit: see Rules</div>
-        <div class="slots-grid" id="slotsGrid"></div>
-        <div id="changesPanel" style="display:none;margin-top:12px"></div>
-        <div style="margin-top:12px;font-size:11px;font-weight:500;color:var(--muted)">
-          Total score this MD: <span style="color:var(--red);font-size:22px;font-weight:600" id="myTotalPts">0</span> pts
-        </div>
+
+    <div class="stage-in">
+      <div class="crumb rise" style="--i:0"><span id="crumbMD">MD</span><span class="sep"></span><span id="crumbTeam">My Team</span></div>
+      <input id="myTeamName" class="team-title rise" style="--i:1" placeholder="Name your team" oninput="saveMyTeam();document.getElementById('crumbTeam').textContent=this.value||'My Team'" aria-label="Team name">
+      <input id="myManagerName" class="team-mgr-input rise" style="--i:2" placeholder="Manager name" oninput="saveMyTeam()" aria-label="Manager name">
+      <div class="transfer-info rise" id="transferInfo" style="--i:2">
+        <span id="transferLabel">Transfers this MD: <span id="transferUsed">0</span>/2</span>
+        <span>Penalty <span id="penaltyPts" style="color:var(--accent-ink)">-0 pts</span></span>
+        <span class="team-sub" id="saveInfo" style="margin:0">All changes saved</span>
       </div>
-      <div class="sidebar">
-        <div class="sidebar-card">
-          <div class="sc-title">Captain (×2)</div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Click to assign from your squad</div>
-          <div id="captainList"></div>
-        </div>
-        <div class="sidebar-card">
-          <div class="sc-title">Chips</div>
-          <div class="chip-list" id="chipList"></div>
-        </div>
+      <div class="team-actions rise" style="--i:3">
+        <button class="btn btn-red" id="confirmBtn" onclick="confirmTeam()">Save team</button>
+        <button class="btn btn-outline" id="discardBtn" onclick="discardDraft()" style="display:none">Discard</button>
+        <button class="btn btn-ghost" onclick="deleteMyTeam()">Remove team</button>
+      </div>
+      <div class="stage-banners"><div id="deadlineBanner"></div><div id="lockBanner"></div><div id="changesPanel" style="display:none"></div></div>
+
+      <div class="formation">
+        <div class="frow-label label rise" style="--i:4">Main roles</div>
+        <div class="frow" id="slotsMain"></div>
+        <div class="frow-label label rise" style="--i:9">Any role</div>
+        <div class="frow" id="slotsAny"></div>
       </div>
     </div>
-  </div>
-  <div class="save-bar">
-    <div class="save-info" id="saveInfo">All changes saved</div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button class="btn btn-outline" id="discardBtn" onclick="discardDraft()" style="display:none">✕ Discard</button>
-      <button class="btn btn-outline" style="border-color:rgba(255,70,85,0.3);color:var(--red)" onclick="deleteMyTeam()">🗑 Remove</button>
-      <button class="btn btn-red" id="confirmBtn" onclick="confirmTeam()">✓ Save Team</button>
+
+    <div class="team-foot">
+      <div class="rise" style="--i:13"><div class="label">/ Captain</div><p class="statement" id="teamStatement"></p><div id="captainList" hidden></div></div>
+      <div class="rise" style="--i:14"><div class="label" style="margin-bottom:8px">Chip · one per matchday</div><div class="chip-list" id="chipList"></div></div>
     </div>
+  </section>
+  <div class="dirty-bar" id="dirtyBar" hidden>
+    <span>You have unsaved changes</span>
+    <div style="display:flex;gap:6px"><button class="btn btn-ghost" onclick="discardDraft()" style="color:var(--on-panel)">Discard</button><button class="btn btn-red" onclick="confirmTeam()">Save team</button></div>
   </div>
 </div>
 
 <!-- PAGE: PLAYERS -->
 <div class="page" id="page-players">
   <div class="container">
-    <div class="sec-title">All Players</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-      <input id="playersSearch" placeholder="Search players..." oninput="renderPlayersPage()" style="background:var(--s2);border:1px solid var(--border2);color:var(--text);padding:8px 12px;font-family:'Sarabun',sans-serif;font-size:14px;outline:none;flex:1;min-width:180px;max-width:280px;transition:.2s">
+    <div class="sec-head rise"><div><div class="label">Prices update after each matchday</div><h2 class="sec-title">Players</h2></div></div>
+    <div class="players-tools rise" style="--i:1">
+      <input id="playersSearch" class="search-input" placeholder="Search players or teams" oninput="renderPlayersPage()" aria-label="Search players">
     </div>
-    <div id="role-filters" class="modal-filters" style="margin-bottom:8px">
+    <div id="role-filters" class="modal-filters rise" style="margin-bottom:8px;padding:0;--i:2">
       <button class="filter-btn on" onclick="setPlayersFilter('ALL',this)">All Roles</button>
       <button class="filter-btn" onclick="setPlayersFilter('Duelist',this)">Duelist</button>
       <button class="filter-btn" onclick="setPlayersFilter('Initiator',this)">Initiator</button>
       <button class="filter-btn" onclick="setPlayersFilter('Controller',this)">Controller</button>
       <button class="filter-btn" onclick="setPlayersFilter('Sentinel',this)">Sentinel</button>
     </div>
-    <div id="price-filters" class="modal-filters" style="margin-bottom:16px">
+    <div id="price-filters" class="modal-filters rise" style="margin-bottom:28px;padding:0;--i:3">
       <button class="filter-btn on" onclick="setPlayersPriceFilter('ALL',this)">All Prices</button>
       <button class="filter-btn" onclick="setPlayersPriceFilter('6',this)">≤6M</button>
       <button class="filter-btn" onclick="setPlayersPriceFilter('10',this)">≤10M</button>
@@ -287,7 +294,7 @@
 <div class="page" id="page-rules">
   <div class="container">
     <div class="hero" style="padding:40px 20px 24px">
-      <div class="event-tag">📖 RULEBOOK</div>
+      <div class="event-tag">RULEBOOK</div>
       <h1>VALO<span>TASY</span><br>RULES</h1>
       <div class="hero-sub">CHAMPIONS SHANGHAI 2026</div>
     </div>
@@ -393,7 +400,7 @@
     <p style="text-align:center;margin-bottom:20px">The <code style="background:var(--s2);padding:2px 6px;border-radius:3px;font-size:12px">valotasy_data</code> table was not found in your Supabase project.</p>
     <div style="font-size:10px;font-weight:500;letter-spacing:1.5px;color:var(--muted);margin-bottom:8px;text-transform:uppercase">1. Go to your Supabase dashboard → SQL Editor</div>
     <div style="font-size:10px;font-weight:500;letter-spacing:1.5px;color:var(--muted);margin-bottom:8px;text-transform:uppercase">2. Paste and run this SQL:</div>
-    <pre style="background:var(--s2);border:0.5px solid var(--border2);padding:14px;font-size:11px;font-family:monospace;white-space:pre-wrap;border-radius:4px;color:#ccc;margin-bottom:12px;overflow-x:auto">CREATE TABLE IF NOT EXISTS valotasy_data (
+    <pre style="background:var(--s2);border:0.5px solid var(--border2);padding:14px;font-size:11px;font-family:monospace;white-space:pre-wrap;border-radius:4px;color:var(--muted);margin-bottom:12px;overflow-x:auto">CREATE TABLE IF NOT EXISTS valotasy_data (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -433,6 +440,6 @@ CREATE POLICY "public_access" ON users FOR ALL USING (true) WITH CHECK (true);</
   </div>
 </div>
 
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

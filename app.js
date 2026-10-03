@@ -249,7 +249,22 @@ function subscribeRealtime(){
       if(active?.id==='page-lb') renderLB();
     })
     .on('postgres_changes',{event:'*',schema:'public',table:'matchdays'},(payload)=>{
-      loadAppData().then(()=>{ renderLB(); if(currentUser) renderTeamPage(); });
+      const prevMDId=currentMDId;
+      loadAppData().then(async ()=>{
+        renderLB();
+        if(currentUser){
+          // The current matchday changed under us — myChip/myUsedChips/myTransferCount
+          // were loaded for the old matchday, so a stale myUsedChips could let a chip
+          // already spent on prevMDId look "unused" and get activated again here.
+          // Re-sync from the DB rather than just re-rendering stale state.
+          if(currentMDId!==prevMDId){
+            const hadUnsaved=isDirty;
+            await loadMyTeam();
+            if(hadUnsaved) toast('Matchday changed — unsaved changes were discarded');
+          }
+          renderTeamPage();
+        }
+      });
     })
     .on('postgres_changes',{event:'*',schema:'public',table:'predictions'},(payload)=>{
       const active=document.querySelector('.page.active');

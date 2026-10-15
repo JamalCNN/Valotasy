@@ -424,10 +424,13 @@ Deno.serve(async (req) => {
           // Match against the team's current captain_id/captain2_id rather than the
           // per-row is_captain flag, since that flag only reflects who was captain
           // at the moment each individual match happened to be scraped.
+          // captain2_id only ever counts under clonecap — it must not be trusted for
+          // any other chip, since nothing stops it from being stale/non-null otherwise
+          // (e.g. left over from a clonecap pick before the chip was switched).
           const mult = chip === "triplecap" ? 3 : 2;
           const caps = captainMap[teamId] ?? { captainId: null, captain2Id: null };
           const captainLogs = mdLogs.filter((l: any) =>
-            l.player_id === caps.captainId || l.player_id === caps.captain2Id
+            l.player_id === caps.captainId || (chip === "clonecap" && l.player_id === caps.captain2Id)
           );
           for (const log of captainLogs) {
             await sb.from("score_logs").update({ final_pts: log.raw_pts * mult, is_captain: true }).eq("id", log.id);
@@ -632,7 +635,8 @@ Deno.serve(async (req) => {
         }
 
         const isCaptain = team.captainId === playerId;
-        const isCaptain2 = team.captain2Id === playerId;
+        // captain2_id only ever counts under clonecap — see note in the finalize branch.
+        const isCaptain2 = team.chip === "clonecap" && team.captain2Id === playerId;
         const isAnyCaptain = isCaptain || isCaptain2;
 
         // Apply the captain multiplier immediately using the team's current captain,

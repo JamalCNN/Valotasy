@@ -1052,9 +1052,20 @@ async function pickPlayer(pid){
 }
 
 // ===== DRAFT CONFIRM / DISCARD =====
+let _confirmingTeam=false;
 async function confirmTeam(){
+  if(_confirmingTeam) return; // guard against double-submit (rapid clicks/slow network) logging duplicate transfers
   if(!myTeamId){toast('Not logged in');return;}
   if(getDraftBudget()<0){toast('Over budget — adjust your squad');return;}
+  _confirmingTeam=true;
+  try{
+    await _confirmTeamImpl();
+  } finally {
+    _confirmingTeam=false;
+  }
+}
+
+async function _confirmTeamImpl(){
 
   // Save team name
   const newName=(document.getElementById('myTeamName')?.value.trim())||myTeamName;
